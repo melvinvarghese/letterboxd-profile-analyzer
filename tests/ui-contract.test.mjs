@@ -187,3 +187,33 @@ test('busy Browse remains focusable and prevents a second file selection', () =>
   assert.match(browseButton, /onClick=\{\(\)=>\{if\(!busy\)fileRef\.current\?\.click\(\);\}\}/);
   assert.match(browseButton, /busy\?'Reading files…':'Browse files'/);
 });
+
+const filmExplorer = page.slice(page.indexOf("{data&&active==='Film explorer'&&"), page.indexOf("{data&&active==='Watchlist'&&"));
+const importData = page.slice(page.indexOf('async function importData'), page.indexOf('function parseProfileUsername'));
+test('Film Explorer displays matched TMDB metadata separately from personal ratings and diary dates', () => {
+  assert.ok(filmExplorer.includes('f.posterUrl'));
+  assert.match(filmExplorer, /alt=\{`TMDB poster: \$\{f\.title\}`\}/);
+  assert.ok(filmExplorer.includes('f.genres'));
+  assert.ok(filmExplorer.includes('f.externalRating'));
+  assert.ok(filmExplorer.includes('f.releaseDate'));
+  assert.match(filmExplorer, />YOUR RATING</);
+  assert.match(filmExplorer, />TMDB RATING</);
+  assert.match(filmExplorer, />DIARY DATE</);
+  assert.match(filmExplorer, />TMDB RELEASE DATE</);
+  assert.ok(filmExplorer.includes('data.tmdbMatchedCount'));
+  assert.ok(filmExplorer.includes('data.tmdbSearchedCount'));
+});
+test('Taste analysis renders matched TMDB genres and imported Letterboxd ratings', () => {
+  const tasteAnalysis = page.slice(page.indexOf("{data&&stats&&active==='Taste analysis'&&"), page.indexOf("{data&&active==='Directors & actors'&&"));
+  assert.ok(tasteAnalysis.includes('result?.genreAnalysis'));
+  assert.match(tasteAnalysis, />TMDB genre</);
+  assert.match(tasteAnalysis, />Matched films \(TMDB\)</);
+  assert.match(tasteAnalysis, />Average rating \(Letterboxd\)</);
+  assert.match(tasteAnalysis, /Rated films \(Letterboxd\)/);
+  assert.doesNotMatch(tasteAnalysis, /No genre labels are inferred from titles/);
+});
+test('TMDB match counts are saved after lookup without changing the 100-film cap', () => {
+  assert.match(importData, /const targets=merged\.films\.filter\(\(f:any\)=>f\.title\)\.slice\(0,100\)/);
+  assert.match(importData, /tmdbMatchedCount:matched/);
+  assert.match(importData, /tmdbSearchedCount:targets\.length/);
+});

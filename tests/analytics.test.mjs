@@ -103,6 +103,22 @@ test('comparison_correlation_requires_three_shared_ratings_and_rejects_zero_vari
   assert.equal(zeroVarianceB.ratingCorrelation,null);
 });
 
+test('genre analysis counts only TMDB-matched films and averages imported ratings',()=>{
+  const result=analyze({films:[
+    {title:'Action Drama',tmdbId:101,genres:['Action','Drama'],rating:4},
+    {title:'Unrated Action',tmdbId:102,genres:['Action'],rating:null},
+    {title:'Action Horror',tmdbId:103,genres:['Action','Horror'],rating:2.5},
+    {title:'Unmatched Drama',genres:['Drama'],rating:5},
+    {title:'TMDB match without genres',tmdbId:104,genres:[],rating:1}
+  ]});
+  assert.deepEqual(result.genreAnalysis,[
+    {name:'Action',matchedFilms:3,ratedFilms:2,averageRating:3.25},
+    {name:'Drama',matchedFilms:1,ratedFilms:1,averageRating:4},
+    {name:'Horror',matchedFilms:1,ratedFilms:1,averageRating:2.5}
+  ]);
+  assert.equal(result.stats.average,3.125);
+});
+
 test('comparison_diary_dates_use_watched_date_and_preserve_repeats',()=>{
   const profileA=analytics.buildComparisonProfile([{name:'diary.csv',type:'diary',rows:[
     {Name:'Common Film',Year:'2000',Date:'2019-01-01','Watched Date':'2020-01-02'},
