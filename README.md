@@ -4,7 +4,7 @@ Explore Letterboxd stats, film diary history, and personal movie ratings from a 
 
 [Open the live analyzer](https://melvinvarghese.github.io/letterboxd-profile-analyzer/)
 
-Created and maintained by **Melvin Varghese**. This project is not affiliated with Letterboxd and does not use an official Letterboxd API.
+Created and maintained by **[Melvin Varghese](https://melvinvarghese.in)**. This project is not affiliated with Letterboxd and does not use an official Letterboxd API.
 
 ## What the analyzer does
 
