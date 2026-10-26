@@ -1,136 +1,81 @@
 # Letterboxd Profile Analyzer
 
-A privacy-first, local-processing Next.js static site for analyzing Letterboxd export files. Personal analysis comes only from files you select; profile URLs are not used. The app does not use the official Letterboxd API or ask for your Letterboxd password or session cookie.
+Explore Letterboxd stats, film diary history, and personal movie ratings from a Letterboxd data export. This browser-based analyzer turns ZIP or CSV exports into searchable film lists, charts, and a two-profile comparison.
 
-Created and maintained by **Melvin Varghese**.
+[Open the live analyzer](https://melvinvarghese.github.io/letterboxd-profile-analyzer/)
 
-## API discovery and evaluation
+Created and maintained by **Melvin Varghese**. This project is not affiliated with Letterboxd and does not use an official Letterboxd API.
 
-Research was initiated from the required [public-apis/public-apis repository](https://github.com/public-apis/public-apis/tree/master), especially its Entertainment category. The current upstream README's Entertainment section does not list a suitable film metadata API, so the directory is not itself an API provider and was not treated as one. The official Letterboxd FAQ recommends applying directly to TMDB for non-Letterboxd movie/TV data and describes account exports and RSS options. Candidate APIs were verified against their own documentation.
+## What the analyzer does
 
-See [API_EVALUATION.md](./API_EVALUATION.md) for the detailed candidate table and limitations.
+- Summarizes watched films, ratings, diary entries, rewatches, release decades, and rating patterns.
+- Shows a searchable film library and keeps watchlist titles separate from watched films.
+- Compares two Letterboxd exports, including shared films, films unique to each profile, rating differences, and rating correlation when at least three shared films have ratings from both profiles.
+- Uses optional TMDB metadata to show matched posters, genres, release dates, and TMDB ratings. Taste analysis can group those genres using the ratings from the imported Letterboxd data.
+- Imports a ZIP export or supported CSV files directly in the browser.
 
-### Decision
+## How it works
 
-No third-party API is required for core analytics. **TMDB is the optional metadata provider** for movie search, details, genres, credits, release dates, runtime, original language, popularity, vote averages, and poster paths. The app's current browser-side enrichment lets a user enter their own TMDB v3 API key in the import dialog. When enabled, the browser sends searches and that key directly to TMDB; this does not change the uploaded files as the source of personal analysis. TMDB requires attribution; its free developer access is for non-commercial use, while commercial use requires contacting TMDB for licensing. Follow TMDB's published rate-limit guidance and respect 429 responses.
+The usual flow is a Letterboxd account export, an import preview, and the analysis dashboard:
 
-OMDb is not selected: its official key page advertises 1,000 requests/day on its free tier, and its data is licensed CC BY-NC 4.0, a significant constraint for commercial use. Wikidata is a possible later fallback, but its query service is not a good bulk fuzzy film-matching engine and documents query/time limits. No external recommendation service is used by the MVP.
+1. Letterboxd provides account exports from its [data export page](https://letterboxd.com/user/exportdata).
+2. The analyzer accepts the ZIP archive or supported CSV files. An import preview lists the files and row counts before analysis begins.
+3. The dashboard presents the imported film diary, ratings, watchlist, and analysis views. **Compare profiles** opens a separate flow for two exports.
 
-## Features
+The app analyzes only the selected files. It does not fetch data from a username or profile URL, and it never needs a Letterboxd password or session cookie.
 
-### Implemented in this MVP
+### Supported export files
 
-- Dark editorial interface with responsive navigation and charts.
-- ZIP and individual supported CSV selection in the browser, with a review step before import.
-- ZIP analysis limited to the canonical root files `watched.csv`, `ratings.csv`, `diary.csv`, `watchlist.csv`, and `reviews.csv`.
-- CSV parsing for quoted commas, escaped quotes, BOM, CRLF, and multiline cells.
-- Title and release-year normalization, rating validation, and diary dates read from `Watched Date` only.
-- Unique-film, diary-entry, rated-film, rating-distribution, diary-year, release-decade, and rewatch statistics, plus rule-based observations.
-- Film search, watchlist view, session clear, and JSON export.
+ZIP archives are read from their root-level `watched.csv`, `ratings.csv`, `diary.csv`, `watchlist.csv`, and `reviews.csv` files. Nested folders such as deleted or orphaned exports are ignored. The same supported CSV files can also be selected individually.
 
-### Partial or not yet implemented
+### How dates and ratings are interpreted
 
-- **Profile comparison:** the navigation retains a Compare profiles placeholder, but there is no functioning comparison flow. Profile URLs are not read or fetched; uploaded files remain the only source of personal data.
-- **TMDB metadata enrichment:** optional browser-side movie search runs only when the user provides their own key in the import dialog. For each import, the app searches up to 100 films sequentially and attaches metadata only when the normalized title and available release year match; it does not silently use a fuzzy first result. Search results can add poster URL, TMDB ID, genre names, release date, popularity, and TMDB vote average. Credits/directors/cast, runtime, countries, and original-language details are not fetched.
-- **API-key privacy:** the key is held only in React in-memory state for the current page session, is not written to local storage or sent to an application server, and is sent directly to `api.themoviedb.org` as a query parameter. The key is visible to the browser and its network tools, so supply one you are comfortable using this way. Reloading or clearing the session removes it. This is a user-supplied credential, not a server-side secret.
-- **Attribution:** when TMDB data is displayed, the app shows: “This product uses the TMDB API but is not endorsed or certified by TMDB.” Review TMDB's current terms, attribution rules, and commercial licensing before public or commercial use.
-- **Recommendations:** the interface has watchlist-first placeholders; candidate retrieval and ranking are not connected.
-- **Advanced statistics:** standard deviation, rating-vs-external normalization, streaks, weekday patterns, year-over-year genre trends, confidence-aware genre/director analysis, and configurable mainstream definition remain future work.
-- **Archive hardening:** the app has ZIP entry, size, expansion, compression-ratio, encryption, and path checks, but it is not intended as a public multi-user service without further security review.
-- **Persistence/database:** none. Data remains in browser memory; reload clears it.
+- A diary viewing date comes only from a valid `Watched Date` in `diary.csv`. A film’s release `Year` is never treated as a viewing date.
+- Watched and rated films without a valid diary date remain in the film and rating analysis, but are not assigned a viewing year.
+- Diary rows represent viewing events, so rewatches can appear as separate dated entries.
+- Personal rating summaries use ratings from the imported Letterboxd data. TMDB ratings are shown separately.
+- Watchlist items are not counted as watched films or personal ratings.
 
-## Technology and architecture
+## Optional TMDB metadata
 
-- Next.js App Router, React, TypeScript
-- Tailwind CSS, Recharts, lucide-react
-- `fflate` for in-browser ZIP extraction
-- Pure JavaScript analysis core in `lib/analytics.mjs` and `lib/import.mjs`, tested with Node's built-in test runner
-- No backend database or user-upload endpoint
+A TMDB v3 API key is optional. When one is entered in the import dialog, the browser searches TMDB for up to **100 films per import** and adds metadata only when the title matches and the available release year is compatible. The remaining films are still analyzed from the Letterboxd export; they simply are not searched on TMDB.
 
-### Folder structure
+Matched metadata can include poster images, genre labels, release dates, TMDB vote averages, and popularity. TMDB genre labels appear separately from imported Letterboxd ratings in Taste analysis, and TMDB ratings never replace personal ratings. Because movie titles can be ambiguous, metadata matches should be reviewed when needed.
 
-```text
-app/
-  globals.css             Editorial dark theme
-  layout.tsx              App metadata and root layout
-  page.tsx                Import workflow and dashboard sections
-lib/
-  analytics.mjs           CSV parsing, normalization, merging, and statistics
-  import.mjs              Canonical root CSV selection from ZIP archives
-tests/
-  analytics.test.mjs      Analysis unit tests
-  import.test.mjs         Archive parser tests
-  ui-contract.test.mjs    Upload-only UI contract tests
-API_EVALUATION.md         Candidate research and decisions
-.env.example              Optional API configuration placeholders
-```
+The API key stays in browser memory for the current page session and is sent directly from the browser to TMDB. It is not stored by this app or sent to an application server. Reloading the page clears it.
 
-## Requirements
+This product uses the TMDB API but is not endorsed or certified by TMDB. TMDB's developer API is for non-commercial use; commercial use requires a separate licensing decision. Review the [TMDB API terms](https://www.themoviedb.org/documentation/api/terms-of-use) and [rate-limit guidance](https://developer.themoviedb.org/docs/rate-limiting).
 
-- Node.js 20.9+ (Node 22 recommended)
-- npm
-- Network access for first-time dependency installation
+## Privacy and data handling
 
-## Deploy on GitHub Pages
+Letterboxd ZIP and CSV files are parsed in the browser and are not uploaded to an application server or stored in a database. Imported data remains in page memory and is cleared when the page reloads. A JSON export is downloaded only when requested.
 
-This project is configured for **static export** (`output: export`) and includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`. GitHub Pages hosts the interface; CSV/ZIP parsing and core analytics run in the visitor's browser. Core analytics needs no Next.js server, API routes, database, or secret.
+With optional TMDB enrichment, movie searches and the user-supplied API key go directly from the browser to TMDB. No Letterboxd archive is sent to TMDB.
 
-1. Create a GitHub repository (for example, `letterboxd-profile-analyzer`) and upload/push the contents of this project to its `main` branch.
-2. In the repository, open **Settings → Pages**.
-3. Under **Build and deployment**, choose **GitHub Actions** as the source.
-4. Push to `main` or run the workflow manually from **Actions → Deploy Letterboxd Profile Analyzer to GitHub Pages → Run workflow**.
-5. When the workflow succeeds, open the Pages URL shown in the deployment job. For a project repository, it will normally be `https://YOUR-USERNAME.github.io/REPOSITORY-NAME/`.
+## Current limitations
 
-The workflow sets the Next.js base path to the repository name automatically, so project-site asset URLs work under the repository subpath. If using a custom domain or a `YOUR-USERNAME.github.io` user-site repository, review `.github/workflows/deploy-pages.yml` and the `NEXT_PUBLIC_BASE_PATH` setting before deploying.
-
-GitHub Pages only serves static files, so it cannot provide server-side features such as backend routes or secret API keys. Optional TMDB movie searches run directly from the browser only after the user enters their own key. Never put a secret API key in a `NEXT_PUBLIC_*` variable or shipped frontend bundle.
+- TMDB searches are capped at 100 films per import. Other imported films remain available for local analysis without TMDB metadata.
+- TMDB matching is title-based with a release-year check when a year is available; it does not use a fuzzy first-result guess.
+- TMDB enrichment does not currently fetch cast, crew, runtime, country, or original-language details.
+- The Recommendations section is not yet connected to a recommendation engine.
+- Data is not saved between page sessions.
 
 ## Run locally
 
+**Requirements:** Node.js 20.9 or newer and npm.
+
 ```bash
 npm install
-npm test
 npm run dev
 ```
 
-Open `http://localhost:3000`. Choose **Import your data** and select a Letterboxd export ZIP or individual supported CSV files. Review the detected files and row counts, then confirm with the **Analyze N files** button.
+The development app opens at `http://localhost:3000`. To run the tests, use `npm test`. To create the static production build, use `npm run build`; the exported site is written to `out/`.
 
-Build the static site locally:
+## Technology
 
-```bash
-npm run build
-```
+- Next.js App Router, React, TypeScript, and Tailwind CSS
+- Recharts for charts and `fflate` for in-browser ZIP extraction
+- Node.js built-in test runner
+- Static GitHub Pages deployment through GitHub Actions; no backend is required for core analysis
 
-The exported website is written to `out/`. Preview it with any static file server, or deploy it through the included GitHub Actions workflow.
-
-## Getting and importing a Letterboxd export
-
-1. Sign in directly on Letterboxd and [open the data-export page](https://letterboxd.com/user/exportdata).
-2. Request and download your account export ZIP.
-3. Select the ZIP in this app, or choose individual supported CSV files. Inspect the preview and confirm the import. The app does not use a profile URL; your selected files are the only source of personal analysis.
-4. Never give this application your Letterboxd password or session cookie.
-
-For ZIP uploads, only canonical CSVs at the archive root are analyzed: `watched.csv`, `ratings.csv`, `diary.csv`, `watchlist.csv`, and `reviews.csv`. Nested or unsupported CSVs are ignored, and their paths appear in the import diagnostics. Individual supported CSV files can also be selected directly.
-
-### How dates and records are interpreted
-
-- A film's `Year` is its release year, not a viewing date. A generic `Date` field is not proof that you watched a film.
-- Only a valid `Watched Date` in a `diary.csv` row creates a diary date and viewing year. Watched or rated films without a real `Watched Date` remain in film and rating analysis, but receive no viewing year.
-- Diary timelines count diary rows/events by their valid `Watched Date`; rewatches can therefore count as separate diary entries, even for the same film. Rows with a missing or invalid `Watched Date` remain undated and do not appear in a viewing-year total.
-- Watchlist entries remain separate from watched films. A review does not imply a rating; only imported rating data contributes to personal-rating analysis.
-
-## Environment variables
-
-Core analytics require no API key. The optional TMDB flow instead lets each user intentionally enter their own TMDB v3 key in the import dialog; the browser uses it directly and does not persist it. `.env.example` is a placeholder for optional future API configuration and is not needed for this flow.
-
-## Privacy and retention
-
-- The selected files are parsed in the user's browser. They are not POSTed to an analytics server or stored in an application database, and the app does not use analytics tracking.
-- App state is memory-only and is cleared on reload; the Settings page can clear the active dataset.
-- JSON export is initiated by the user and saved to their device.
-- Optional TMDB enrichment sends searches and the user-provided key directly from the browser to TMDB; no Letterboxd file is sent to an application server.
-- Public deployment should include appropriate file validation, decompression limits, CSP/security headers, abuse/rate controls, dependency scanning, and a privacy review.
-
-## Deployment
-
-The app is structured for a standard Node-compatible Next.js deployment, including static export to GitHub Pages. No database or secret is required for local analytics. If enabling TMDB, review its latest terms, attribution rules, and commercial licensing; the app displays the required attribution notice when TMDB data is shown. Do not use the free developer tier for a commercial product without a licensing decision.
+See [API_EVALUATION.md](./API_EVALUATION.md) for the metadata-provider research and [GITHUB_PAGES.md](./GITHUB_PAGES.md) for deployment details.
