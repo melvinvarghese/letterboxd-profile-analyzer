@@ -1,4 +1,89 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101210;color:#f0f1ec;font-family:Arial,Helvetica,sans-serif}button,input{font:inherit}button{cursor:pointer}.muted{color:#929a91}.panel{background:#171a17;border:1px solid #292e29;border-radius:16px}.accent{color:#b6f36b}.scrollbar::-webkit-scrollbar{height:5px;width:5px}.scrollbar::-webkit-scrollbar-thumb{background:#424a40;border-radius:9px}
+
+:root {
+  color-scheme: dark;
+  --color-background: #14181C;
+  --color-header: color-mix(in srgb, var(--color-background) 95%, transparent);
+  --color-backdrop: color-mix(in srgb, var(--color-background) 80%, transparent);
+  --color-poster: #12161A;
+  --color-surface: #202830;
+  --color-raised: #283038;
+  --color-border: #2C3440;
+  --color-primary-green: #00E054;
+  --color-button-green: #00AC1C;
+  --color-button-hover: #00C030;
+  --color-button-active: #009926;
+  --color-text-primary: #FFFFFF;
+  --color-text-body: #99AABB;
+  --color-text-secondary: #AABBCC;
+  --color-text-muted: #778899;
+  --color-text-subtle: #667788;
+  --color-link: #DDEEFF;
+  --color-link-hover: #40BCF4;
+  --color-chart-personal: var(--color-primary-green);
+  --color-chart-external: var(--color-link-hover);
+  --color-focus: var(--color-primary-green);
+  --color-error-border: #704642;
+  --color-error-surface: #261A18;
+  --color-error-text: #F1B8AD;
+  --color-error-icon: #F1A69B;
+  --color-warning-border: #5B4934;
+  --color-warning-surface: #211D17;
+  --color-warning-text: #D9C6A5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+}
+
+.accent {
+  color: var(--color-primary-green);
+}
+
+.scrollbar {
+  scrollbar-color: var(--color-border) var(--color-background);
+  scrollbar-width: thin;
+}
+
+.scrollbar::-webkit-scrollbar {
+  height: 5px;
+  width: 5px;
+}
+
+.scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9px;
+}
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
