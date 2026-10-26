@@ -9,15 +9,14 @@ test('export instructions link to Letterboxd data export in a new tab', () => {
   assert.match(page, /href="https:\/\/letterboxd\.com\/user\/exportdata"[^>]*target="_blank"/);
 });
 
-test('no demo, sample, or profile-analysis entry points remain', () => {
-  for (const token of ['loadDemo', 'demoMode', 'sampleData', 'setProfile', 'compareProfiles(']) {
+test('no demo, sample, or profile-scraping entry points remain', () => {
+  for (const token of ['loadDemo', 'demoMode', 'sampleData', 'setProfile']) {
     assert.equal(page.includes(token), false, `unexpected page reference: ${token}`);
   }
   for (const label of ['Explore sample analysis', 'Preview with sample data', 'Load sample']) {
     assert.equal(page.includes(label), false, `unexpected sample button label: ${label}`);
   }
   assert.equal(/placeholder="[^"]*(?:username|profile URL)/i.test(page), false);
-  assert.equal(/import\s*\{[^}]*compareProfiles[^}]*\}\s*from/.test(page), false);
 });
 
 test('viewing timeline is counted from diary entries', () => {
@@ -28,10 +27,95 @@ test('tracked fictional sample data is removed', () => {
   assert.equal(existsSync(new URL('../sample-data/', import.meta.url)), false);
 });
 
-test('compare profiles remains the existing nonfunctional placeholder', () => {
-  assert.match(page, /\['Compare profiles',Layers3\]/);
-  assert.ok(page.includes('Comparison status'));
-  assert.ok(page.includes('Choose another export'));
+const comparisonView = page.slice(page.indexOf("active==='Compare profiles'&&"), page.indexOf("active==='Settings & privacy'"));
+const comparisonHandler = page.slice(page.indexOf('async function readComparisonFiles'), page.indexOf('function compareImportedProfiles'));
+
+test('home offers a distinct comparison action beside single-profile analysis', () => {
+  const home = page.slice(page.indexOf('<section className="relative'), page.indexOf('</section>'));
+  assert.ok(home.includes('Analyze my Letterboxd data'));
+  assert.match(home, /onClick=\{\(\)=>setActive\('Compare profiles'\)\}[^>]*>[\s\S]*?Compare two profiles/);
+});
+
+test('comparison navigation renders before a primary dataset exists', () => {
+  assert.match(page, /\{active==='Compare profiles'&&/);
+  assert.doesNotMatch(comparisonView, /^data&&/);
+});
+
+test('comparison mode suppresses the primary-profile empty-state prompt', () => {
+  assert.match(page, /\{!data&&active!=='Overview'&&active!=='Compare profiles'&&<div className="panel p-8"/);
+});
+
+test('comparison slots keep separate A/B previews and show username-only labels', () => {
+  assert.match(page, /\[comparisonSides,setComparisonSides\]=useState<any>\(\{A:null,B:null\}\)/);
+  assert.match(page, /comparisonAFileRef=useRef<HTMLInputElement\|null>\(null\)/);
+  assert.match(page, /comparisonBFileRef=useRef<HTMLInputElement\|null>\(null\)/);
+  assert.ok(comparisonView.includes('Profile A'));
+  assert.ok(comparisonView.includes('Profile B'));
+  assert.match(comparisonView, /state=comparisonSides\[side\]/);
+  assert.match(comparisonView, /state\?\.profile\.username\|\|'Username unavailable'/);
+  assert.doesNotMatch(comparisonView, /profile\.(?:Name|Email|Location|Website|Bio)/);
+});
+
+test('comparison results render shared, unique, rating, and diary-date details', () => {
+  assert.match(comparisonView, /comparisonResult\.sharedFilms\.map/);
+  assert.match(comparisonView, /comparisonResult\.uniqueToA\.map/);
+  assert.match(comparisonView, /comparisonResult\.uniqueToB\.map/);
+  assert.match(comparisonView, /film\.a\.rating/);
+  assert.match(comparisonView, /film\.b\.rating/);
+  assert.match(comparisonView, /film\.ratingDifference/);
+  assert.match(comparisonView, /film\.a\.diaryDates/);
+  assert.match(comparisonView, /film\.b\.diaryDates/);
+});
+
+test('comparison keeps its status region mounted and announces result counts separately from detailed results', () => {
+  const statusRegion = comparisonView.match(/<p role="status" className="sr-only">([\s\S]*?)<\/p>/);
+  assert.ok(statusRegion, 'comparison mode must render a persistent status region');
+  assert.match(statusRegion[1], /^\{comparisonResult&&<>Comparison complete:[\s\S]*<\/>\}$/);
+  assert.doesNotMatch(comparisonView, /\{comparisonResult&&<p role="status"/);
+  const detailedResults = comparisonView.slice(comparisonView.indexOf('<div className="mt-6 space-y-5">'));
+  assert.doesNotMatch(detailedResults, /role="status"|aria-live=/);
+});
+
+test('comparison explains the three-film minimum separately from zero-variance correlation', () => {
+  assert.match(comparisonView, /sharedRatedFilms<3/);
+  assert.match(comparisonView, /At least three shared films rated by both profiles/);
+  assert.match(comparisonView, /ratingCorrelation===null/);
+  assert.match(comparisonView, /ratings do not vary/);
+  assert.match(comparisonView, /ratingCorrelation\.toFixed\(2\)/);
+});
+
+test('comparison inputs reject mixed ZIP/CSV selections and multiple ZIPs per slot', () => {
+  assert.match(comparisonHandler, /readComparisonFiles\(list:FileList\|null,side:'A'\|'B'\)/);
+  assert.match(comparisonHandler, /archives\.length>1\|\|\(archives\.length===1&&selected\.length!==1\)/);
+  assert.match(comparisonHandler, /validateZipArchive\(bytes\)[\s\S]*?unzipSync\(bytes/);
+  assert.match(comparisonHandler, /parseProfileUsername\(/);
+  assert.match(comparisonHandler, /buildComparisonProfile\(files,username(?: as any)?\)/);
+});
+
+test('replacing one comparison side preserves the other and never touches primary import state', () => {
+  assert.match(comparisonHandler, /setComparisonSides\(\(current:any\)=>\(\{\.\.\.current,\[side\]:null\}\)\)/);
+  assert.match(comparisonHandler, /setComparisonSides\(\(current:any\)=>\(\{\.\.\.current,\[side\]:\{/);
+  assert.match(comparisonHandler, /setComparisonResult\(null\)/);
+  assert.doesNotMatch(comparisonHandler, /setData|importData|fetch|TMDB|localStorage|sessionStorage/);
+});
+
+test('comparison requires film records on both sides before the compare action is enabled', () => {
+  assert.match(page, /const comparisonReady=Boolean\(comparisonSides\.A\?\.profile\.films\.length&&comparisonSides\.B\?\.profile\.films\.length\)/);
+  assert.match(comparisonView, /disabled=\{!comparisonReady/);
+});
+
+test('Clear comparison clears both sides, result, errors, and pending reads', () => {
+  const clearComparison = page.slice(page.indexOf('function clearComparison'), page.indexOf('function clearSession'));
+  assert.match(clearComparison, /setComparisonSides\(\{A:null,B:null\}\)/);
+  assert.match(clearComparison, /setComparisonResult\(null\)/);
+  assert.match(clearComparison, /comparisonReadToken\.current\.A\+\+/);
+  assert.match(clearComparison, /comparisonReadToken\.current\.B\+\+/);
+});
+
+test('the existing clear-session action also clears comparison state', () => {
+  const clearSession = page.slice(page.indexOf('function clearSession'), page.indexOf('function downloadReport'));
+  assert.match(clearSession, /clearComparison\(\)/);
+  assert.match(page, /Clear comparison/);
 });
 
 test('upload errors are visible as alerts inside the open import dialog', () => {
