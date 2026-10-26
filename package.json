@@ -1,6 +1,7 @@
 {
   "name": "letterboxd-profile-analyzer",
   "version": "0.1.0",
+  "author": "Melvin Varghese",
   "private": true,
   "scripts": {
     "dev": "next dev",

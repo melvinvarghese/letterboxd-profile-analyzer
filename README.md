@@ -2,6 +2,8 @@
 
 A privacy-first, local-processing Next.js static site for analyzing Letterboxd export files. Personal analysis comes only from files you select; profile URLs are not used. The app does not use the official Letterboxd API or ask for your Letterboxd password or session cookie.
 
+Created and maintained by **Melvin Varghese**.
+
 ## API discovery and evaluation
 
 Research was initiated from the required [public-apis/public-apis repository](https://github.com/public-apis/public-apis/tree/master), especially its Entertainment category. The current upstream README's Entertainment section does not list a suitable film metadata API, so the directory is not itself an API provider and was not treated as one. The official Letterboxd FAQ recommends applying directly to TMDB for non-Letterboxd movie/TV data and describes account exports and RSS options. Candidate APIs were verified against their own documentation.
