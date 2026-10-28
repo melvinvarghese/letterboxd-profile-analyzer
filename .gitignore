@@ -4,3 +4,6 @@ out/
 .env*
 !.env.example
 .DS_Store
+*.tsbuildinfo
+test-results/
+playwright-report/

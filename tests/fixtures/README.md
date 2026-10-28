@@ -1,0 +1,3 @@
+All records are deterministic synthetic test fixtures. These files are never loaded into the product automatically and contain no person's private export. Titles/links need not correspond to real films.
+
+Expected base fixture: 8 unique watched/rated/diary films; 9 diary events, 7 dated and 2 undated; 7 current film ratings, sum 26, mean 26/7; watchlist 3 titles, 1 also watched; 2024 has 4 dated logs, 2025 has 3. Longest diary streak is 4 days (2024-12-31 through 2025-01-03). Diary flags contain 1 explicit rewatch. Missing/invalid Watched Date values remain undated. Three dates 2024-01-01 through 2024-01-03 form a separate 3-day streak.

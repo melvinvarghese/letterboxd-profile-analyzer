@@ -1,119 +1,1657 @@
-'use client';
-import {useEffect,useMemo,useRef,useState} from 'react';
-import {Activity,ArrowDownToLine,ArrowUpRight,BarChart3,Bookmark,CalendarDays,CheckCircle2,ChevronDown,Clapperboard,Compass,Database,FileArchive,Film,FolderOpen,Heart,Info,Layers3,LoaderCircle,Search,ShieldCheck,SlidersHorizontal,Sparkles,Star,Target,TrendingUp,Upload,Users, X} from 'lucide-react';
-import {Bar,BarChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis,AreaChart,Area,PieChart,Pie,Cell} from 'recharts';
-import {analyze,mergeDatasets,parseCSV,classifyFile,diaryYearCounts,buildComparisonProfile,compareProfiles} from '../lib/analytics.mjs';
-import {parseLetterboxdArchive,parseComparisonArchive,parseProfileUsername} from '../lib/import.mjs';
-import {unzipSync} from 'fflate';
-const nav=[['Overview',Activity],['Taste analysis',Compass],['Directors & actors',Users],['Timeline',CalendarDays],['Film explorer',Film],['Watchlist',Bookmark],['Recommendations',Sparkles],['Compare profiles',Layers3],['Settings & privacy',ShieldCheck]] as const;
-const fmt=(n:number|null|undefined)=>n===null||n===undefined?'—':Number(n).toFixed(2);
-function validateZipArchive(bytes:Uint8Array){
-  if(bytes.length<22)throw new Error('This ZIP file is too small or damaged.');
-  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let eocd=-1;
-  for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--){if(view.getUint32(i,true)===0x06054b50){eocd=i;break;}}
-  if(eocd<0)throw new Error('ZIP directory is missing. Download the export ZIP again.');
-  const count=view.getUint16(eocd+10,true),offset=view.getUint32(eocd+16,true);
-  if(count>5000)throw new Error('This archive contains too many entries (maximum 5,000).');
-  let cursor=offset,total=0;
-  for(let i=0;i<count;i++){
-    if(cursor+46>bytes.length||view.getUint32(cursor,true)!==0x02014b50)throw new Error('ZIP directory is malformed.');
-    const flags=view.getUint16(cursor+8,true),compressed=view.getUint32(cursor+20,true),uncompressed=view.getUint32(cursor+24,true);
-    const nameLen=view.getUint16(cursor+28,true),extraLen=view.getUint16(cursor+30,true),commentLen=view.getUint16(cursor+32,true);
-    const name=new TextDecoder().decode(bytes.subarray(cursor+46,cursor+46+nameLen));
-    if(flags&1)throw new Error('Encrypted ZIP archives are not supported.');
-    if(name.startsWith('/')||name.startsWith('\\')||name.split(/[\\/]/).includes('..'))throw new Error('Unsafe ZIP path detected.');
-    if(uncompressed>15*1024*1024)throw new Error(`Archive entry ${name} exceeds the 15 MB decompressed file limit.`);
-    total+=uncompressed;if(total>100*1024*1024)throw new Error('The ZIP expands beyond the 100 MB safety limit.');
-    if(compressed===0&&uncompressed>0||compressed>0&&uncompressed/compressed>200)throw new Error('ZIP compression ratio is unusually high; archive rejected for safety.');
-    cursor+=46+nameLen+extraLen+commentLen;
-  }
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import {
+  Clapperboard,
+  Activity,
+  Film,
+  CalendarDays,
+  Star,
+  Compass,
+  Users,
+  Bookmark,
+  ArrowRightLeft,
+  ShieldCheck,
+  Upload,
+  Download,
+  Sun,
+  Moon,
+  Menu,
+  X,
+  ArrowUpRight,
+  RotateCcw,
+  Trash2,
+  Save,
+  FolderOpen,
+  Info,
+  ChevronRight,
+  CheckCircle2,
+  Layers3,
+} from "lucide-react";
+import {
+  analyze,
+  filterDataset,
+  canonicalFilmURL,
+  sortFilms,
+  titleKey,
+} from "../lib/analytics.mjs";
+import {
+  makeSnapshot,
+  readSnapshot,
+  filmsCSV,
+  reportSVG,
+  describeFilters,
+} from "../lib/export.mjs";
+import {
+  createTMDBClient,
+  enrichFilms,
+  metadataFromDetails,
+} from "../lib/tmdb.mjs";
+import { loadWorkspace, saveWorkspace, clearWorkspace } from "../lib/storage";
+import {
+  Button,
+  Empty,
+  Title,
+  Section,
+  Metric,
+  Modal,
+  Poster,
+  FilmList,
+  Pager,
+  fmt,
+  MediaConsent,
+} from "./ui";
+import { Importer, ImportReport } from "./importer";
+import {
+  Overview,
+  Explorer,
+  Diary,
+  Ratings,
+  Taste,
+  People,
+  Watchlist,
+  YearCompare,
+} from "./views";
+const Comparison = dynamic(() => import("./comparison"), {
+  loading: () => <p role="status">Opening comparison…</p>,
+});
+const navigation = [
+  ["overview", "Overview", Activity],
+  ["films", "Film explorer", Film],
+  ["diary", "Diary & activity", CalendarDays],
+  ["ratings", "Ratings", Star],
+  ["taste", "Taste & places", Compass],
+  ["people", "Directors & actors", Users],
+  ["watchlist", "Watchlist & next picks", Bookmark],
+  ["years", "Compare years", Layers3],
+  ["compare", "Compare profiles", ArrowRightLeft],
+  ["settings", "Data & privacy", ShieldCheck],
+] as const;
+const emptyFilters = {
+  year: "",
+  from: "",
+  to: "",
+  rating: "",
+  genre: "",
+  decade: "",
+};
+const base = process.env.NEXT_PUBLIC_BASE_PATH
+  ? `/${process.env.NEXT_PUBLIC_BASE_PATH.replace(/^\/+|\/+$/g, "")}`
+  : "";
+function download(text: string, filename: string, type = "application/json") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export default function Home(){const [data,setData]=useState<any>(null),[active,setActive]=useState('Overview'),[files,setFiles]=useState<any[]>([]),[preview,setPreview]=useState<any[]>([]),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[search,setSearch]=useState(''),[filter,setFilter]=useState('All films'),[sort,setSort]=useState('Title A–Z'),[showImport,setShowImport]=useState(false),[skippedPaths,setSkippedPaths]=useState<string[]>([]),[messageError,setMessageError]=useState(false),[tmdbApiKey,setTmdbApiKey]=useState(''),[enriching,setEnriching]=useState(false);const fileRef=useRef<HTMLInputElement>(null),importDialogRef=useRef<HTMLDivElement>(null),importTriggerRef=useRef<HTMLElement|null>(null),importFallbackRef=useRef<HTMLButtonElement|null>(null),wasImportOpen=useRef(false);const [comparisonSides,setComparisonSides]=useState<any>({A:null,B:null}),[comparisonResult,setComparisonResult]=useState<any>(null),[comparisonError,setComparisonError]=useState(''),[comparisonBusy,setComparisonBusy]=useState({A:false,B:false});const comparisonAFileRef=useRef<HTMLInputElement|null>(null),comparisonBFileRef=useRef<HTMLInputElement|null>(null),comparisonReadToken=useRef({A:0,B:0});
-function openImport(trigger:HTMLElement){importTriggerRef.current=trigger;setShowImport(true);}
-function closeImport(){setShowImport(false);}
-useEffect(()=>{if(!showImport){if(wasImportOpen.current){if(importTriggerRef.current?.isConnected)importTriggerRef.current.focus();else importFallbackRef.current?.focus();}wasImportOpen.current=false;return;}wasImportOpen.current=true;const dialog=importDialogRef.current;dialog?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')?.focus();const handleKeyDown=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setShowImport(false);return;}if(event.key!=='Tab')return;const focusable=Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')||[]).filter(element=>element.getClientRects().length>0);if(!focusable.length){event.preventDefault();dialog?.focus();return;}const first=focusable[0],last=focusable[focusable.length-1],active=document.activeElement;if(event.shiftKey&&(active===first||!dialog?.contains(active))){event.preventDefault();last.focus();}else if(!event.shiftKey&&(active===last||!dialog?.contains(active))){event.preventDefault();first.focus();}};document.addEventListener('keydown',handleKeyDown);return()=>document.removeEventListener('keydown',handleKeyDown);},[showImport]);
-const result=useMemo(()=>data?analyze(data):null,[data]);const films=data?.films||[];const stats=result?.stats;const diaryByYear=useMemo(()=>diaryYearCounts(data?.diary || []),[data?.diary]);const ratedByRating=stats?.ratingDistribution||[];const filteredFilms=useMemo(()=>{let a=[...films];if(search)a=a.filter(f=>`${f.title} ${f.year||''} ${f.director||''}`.toLowerCase().includes(search.toLowerCase()));if(filter==='Rated')a=a.filter(f=>f.rating!==null&&f.rating!==undefined);if(filter==='Rewatches')a=a.filter(f=>f.rewatchCount>0);if(filter==='Unrated')a=a.filter(f=>f.rating===null||f.rating===undefined);if(sort==='Highest rated')a.sort((x,y)=>(y.rating||0)-(x.rating||0));else if(sort==='Newest year')a.sort((x,y)=>(y.year||0)-(x.year||0));else a.sort((x,y)=>x.title.localeCompare(y.title));return a;},[films,search,filter,sort]);
-const comparisonReady=Boolean(comparisonSides.A?.profile.films.length&&comparisonSides.B?.profile.films.length);
-async function readFiles(list:FileList|null){if(!list?.length)return;setBusy(true);setMessage('');setMessageError(false);setFiles([]);setPreview([]);setSkippedPaths([]);try{const found:any[]=[];const skipped:string[]=[];for(const file of Array.from(list)){if(file.size>40*1024*1024)throw new Error(`${file.name} exceeds the 40 MB file limit.`);if(file.name.toLowerCase().endsWith('.zip')){const bytes=new Uint8Array(await file.arrayBuffer());validateZipArchive(bytes);let archive:any;try{archive=unzipSync(bytes,{filter:(f:any)=>!f.name.startsWith('/')&&!f.name.split('/').includes('..')});}catch{throw new Error('This ZIP could not be opened. Try downloading the export again.');}const csvEntries=Object.fromEntries(Object.entries(archive).filter(([name,content])=>name.toLowerCase().endsWith('.csv')&&(content as Uint8Array).length<=15*1024*1024));const parsed=parseLetterboxdArchive(csvEntries);found.push(...parsed.files);skipped.push(...parsed.skippedPaths);}else if(file.name.toLowerCase().endsWith('.csv')){const type=classifyFile(file.name);if(type==='other'){skipped.push(file.name);continue;}const text=await file.text();found.push({name:file.name,type,rows:parseCSV(text)});}else throw new Error('Choose a .zip archive or .csv file.');}setPreview(found);setFiles(found);setSkippedPaths(skipped);if(!found.length){setMessageError(true);setMessage('No supported CSV files were recognized. Choose supported individual CSVs or a Letterboxd ZIP containing canonical root CSVs. Ignored paths are shown in the preview.');return;}setMessage(`Found ${found.length} CSV file${found.length===1?'':'s'}. Review the detected data before importing.`);}catch(e:any){setFiles([]);setPreview([]);setSkippedPaths([]);setMessageError(true);setMessage(e?.message||'Import failed. Check the file and try again.');}finally{setBusy(false);}}
-async function importData(){
-  const merged=mergeDatasets(files);setData(merged);closeImport();setMessageError(false);setActive('Overview');
-  if(!tmdbApiKey.trim()){setMessage(`Imported ${merged.films.length} unique film records from ${files.length} file(s). Add a TMDB API key in the import dialog to enrich film metadata later.`);return;}
-  setEnriching(true);setMessage('Import complete. Looking up film metadata on TMDB…');
-  const genreNames:Record<number,string>={28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',14:'Fantasy',36:'History',27:'Horror',10402:'Music',9648:'Mystery',10749:'Romance',878:'Science Fiction',10770:'TV Movie',53:'Thriller',10752:'War',37:'Western'};
-  const targets=merged.films.filter((f:any)=>f.title).slice(0,100);let matched=0;const enriched=[...merged.films];
-  try{
-    for(let i=0;i<targets.length;i++){
-      const film=targets[i];
-      const params=new URLSearchParams({api_key:tmdbApiKey.trim(),query:film.title,include_adult:'false'});if(film.year)params.set('year',String(film.year));
-      const response=await fetch(`https://api.themoviedb.org/3/search/movie?${params.toString()}`,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(12000)});
-      if(response.status===401)throw new Error('TMDB rejected this API key. Check that you entered a valid TMDB API key.');
-      if(response.status===429)throw new Error('TMDB rate limit reached. Wait a little before trying again.');
-      if(!response.ok)continue;
-      const payload=await response.json();const candidates=Array.isArray(payload.results)?payload.results:[];
-      const normalized=(v:string)=>v.toLowerCase().replace(/[^a-z0-9]/g,'');
-      const match=candidates.find((x:any)=>normalized(x.title||'')===normalized(film.title)&&(!film.year||!x.release_date||String(x.release_date).slice(0,4)===String(film.year))); // Never attach metadata on a fuzzy title-only guess.
-      if(match){const idx=enriched.findIndex((x:any)=>x===film||x.id===film.id||(x.title===film.title&&x.year===film.year));if(idx>=0){enriched[idx]={...enriched[idx],tmdbId:match.id,posterUrl:match.poster_path?`https://image.tmdb.org/t/p/w500${match.poster_path}`:null,externalRating:typeof match.vote_average==='number'?match.vote_average:null,popularity:typeof match.popularity==='number'?match.popularity:null,releaseDate:match.release_date||null,genres:Array.isArray(match.genre_ids)&&match.genre_ids.length?match.genre_ids.map((id:number)=>genreNames[id]).filter(Boolean):enriched[idx].genres||[],tmdbMatchConfidence:'title-match'};matched++;}}
-      if(i<targets.length-1)await new Promise(resolve=>setTimeout(resolve,250));
+export default function Home() {
+  const [data, setData] = useState<any>(null),
+    [active, setActive] = useState("overview"),
+    [importOpen, setImportOpen] = useState(false),
+    [mobileNav, setMobileNav] = useState(false),
+    [theme, setTheme] = useState("dark"),
+    [notice, setNotice] = useState(""),
+    [error, setError] = useState(""),
+    [filters, setFilters] = useState(emptyFilters),
+    [details, setDetails] = useState<any>(null),
+    [drill, setDrill] = useState<any>(null),
+    [drillPage, setDrillPage] = useState(1),
+    [remember, setRemember] = useState(false),
+    [storageMessage, setStorageMessage] = useState(
+      "Analysis is held in memory until you choose to save it.",
+    ),
+    [showPosters, setShowPosters] = useState(false),
+    [confirmClear, setConfirmClear] = useState(false),
+    [comparisonVersion, setComparisonVersion] = useState(0),
+    [comparisonVisited, setComparisonVisited] = useState(false);
+  const [credential, setCredential] = useState(""),
+    [consent, setConsent] = useState(false),
+    [enriching, setEnriching] = useState(false),
+    [enrichmentProgress, setEnrichmentProgress] = useState(""),
+    [batchLimit, setBatchLimit] = useState("100"),
+    [manualId, setManualId] = useState(""),
+    [matchBusy, setMatchBusy] = useState(false),
+    [snapshotBusy, setSnapshotBusy] = useState(false);
+  const restoreRef = useRef<HTMLInputElement>(null),
+    controllerRef = useRef<AbortController | null>(null),
+    epoch = useRef(0),
+    userActed = useRef(false),
+    heading = useRef<HTMLDivElement>(null),
+    saving = useRef(false);
+  useEffect(() => {
+    try {
+      const preferred = localStorage.getItem("fbf-theme");
+      const t = preferred === "light" ? "light" : "dark";
+      setTheme(t);
+      document.documentElement.dataset.theme = t;
+    } catch {}
+    let mounted = true;
+    loadWorkspace()
+      .then((s) => {
+        if (s && mounted && !userActed.current) {
+          setData(readSnapshot(s));
+          setRemember(true);
+          setStorageMessage("Restored the analysis saved on this device.");
+          setNotice(
+            "Your saved journal is ready. External poster images stay off until you enable them in Data & privacy.",
+          );
+        }
+      })
+      .catch(() => {
+        if (mounted)
+          setStorageMessage(
+            "Browser storage is unavailable. Use a downloadable analysis backup.",
+          );
+      });
+    return () => {
+      mounted = false;
+      controllerRef.current?.abort();
+    };
+  }, []);
+  useEffect(() => {
+    if (!mobileNav) return;
+    const previous = document.activeElement as HTMLElement;
+    const sidebar = document.querySelector<HTMLElement>(".sidebar")!;
+    const items = () =>
+      Array.from(
+        sidebar.querySelectorAll<HTMLElement>("button:not([disabled]),a[href]"),
+      ).filter((e) => e.getClientRects().length > 0);
+    items()[0]?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobileNav(false);
+        return;
+      }
+      if (e.key === "Tab") {
+        const list = items(),
+          first = list[0],
+          last = list.at(-1);
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    const resize = () => {
+      if (window.innerWidth > 1050) setMobileNav(false);
+    };
+    document.addEventListener("keydown", key);
+    window.addEventListener("resize", resize);
+    return () => {
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("resize", resize);
+      setTimeout(() => {
+        if (previous?.isConnected) previous.focus();
+      }, 0);
+    };
+  }, [mobileNav]);
+  useEffect(() => {
+    if (!remember || !data) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      saving.current = true;
+      saveWorkspace(makeSnapshot(data))
+        .then(() => {
+          if (alive)
+            setStorageMessage(
+              "Saved on this browser and device. Download a backup for durable storage.",
+            );
+        })
+        .catch((e: any) => {
+          if (alive) {
+            setError(e.message);
+            setRemember(false);
+          }
+        })
+        .finally(() => {
+          saving.current = false;
+        });
+    }, 600);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [remember, data]);
+  const allResult = useMemo<any>(() => (data ? analyze(data) : null), [data]);
+  const scope = useMemo(
+      () => (data ? filterDataset(data, filters) : null),
+      [data, filters],
+    ),
+    result = useMemo(() => (scope ? analyze(scope) : null), [scope]);
+  const selectedFilm =
+    details && data
+      ? [...data.films, ...data.watchlist].find(
+          (f: any) => f.key === details.key,
+        ) || details
+      : details;
+  const go = useCallback((name: string) => {
+    setActive(name);
+    if (name === "compare") setComparisonVisited(true);
+    setMobileNav(false);
+    setError("");
+    setTimeout(() => heading.current?.focus({ preventScroll: true }), 0);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
+  const stopWork = () => {
+    epoch.current++;
+    controllerRef.current?.abort();
+    setEnriching(false);
+    setMatchBusy(false);
+  };
+  const accept = (next: any) => {
+    userActed.current = true;
+    stopWork();
+    setData(next);
+    setFilters(emptyFilters);
+    setDetails(null);
+    setImportOpen(false);
+    setShowPosters(false);
+    go("overview");
+    setNotice(
+      `Imported ${next.films.length} unique films and ${next.diary.length} diary entries. Review Data & privacy for validation notices.`,
+    );
+  };
+  const closeImport = useCallback(() => setImportOpen(false), []),
+    closeDetails = useCallback(() => {
+      setDetails(null);
+      setManualId("");
+    }, []),
+    closeDrill = useCallback(() => setDrill(null), []);
+  const onFilm = (film: any) => {
+    setManualId("");
+    setDetails(film);
+  };
+  const onDrill = (title: string, films: any[]) => {
+    setDrillPage(1);
+    setDrill({ title, films });
+  };
+  const onRating = (r: number) => {
+    setFilters((s) => ({ ...s, rating: String(r) }));
+    go("films");
+  };
+  const onYear = (y: string) => {
+    setFilters((s) => ({ ...s, year: y, from: "", to: "" }));
+    go("diary");
+  };
+  const onRange = (from: string, to: string) => {
+    setFilters((s) => ({ ...s, year: "", from, to }));
+    go("films");
+  };
+  const exportCSV = (films: any[]) =>
+    download(
+      filmsCSV(films),
+      "frame-by-frame-films.csv",
+      "text/csv;charset=utf-8",
+    );
+  const diagnostics = (d: any) =>
+    download(
+      JSON.stringify(
+        {
+          files: d.importReport,
+          excludedPaths: d.skippedPaths,
+          missing: d.missing,
+        },
+        null,
+        2,
+      ),
+      "frame-by-frame-import-diagnostics.json",
+    );
+  const changeTheme = () => {
+    const t = theme === "dark" ? "light" : "dark";
+    setTheme(t);
+    document.documentElement.dataset.theme = t;
+    try {
+      localStorage.setItem("fbf-theme", t);
+    } catch {}
+  };
+  const restore = async (file: File) => {
+    setSnapshotBusy(true);
+    try {
+      if (file.size > 100 * 1024 * 1024)
+        throw new Error("Analysis backups must be under 100 MB.");
+      const next = readSnapshot(await file.text());
+      accept(next);
+      setNotice(
+        "Analysis backup restored, including original source rows and saved metadata.",
+      );
+    } catch (e: any) {
+      setError(e.message || "Unable to restore this backup.");
+    } finally {
+      setSnapshotBusy(false);
     }
-    const updated={...merged,films:enriched,tmdbMatchedCount:matched,tmdbSearchedCount:targets.length};setData(updated);setMessage(`Imported ${merged.films.length} films. TMDB matched ${matched} of ${targets.length} searched films. ${merged.films.length-targets.length>0?`${merged.films.length-targets.length} additional films were not searched (100-film safety limit).`:''} Metadata matches should be reviewed where titles are ambiguous.`);
-  }catch(e:any){setData(merged);setMessage(`${e?.message||'TMDB metadata lookup failed.'} Your Letterboxd import is safe and analytics remain available without metadata.`);}
-  finally{setEnriching(false);}
-}
-async function readComparisonFiles(list:FileList|null,side:'A'|'B'){
-  const selected=Array.from(list||[]);if(!selected.length)return;
-  const token=++comparisonReadToken.current[side];
-  setComparisonBusy((current:{A:boolean;B:boolean})=>({...current,[side]:true}));setComparisonError('');setComparisonResult(null);setComparisonSides((current:any)=>({...current,[side]:null}));
-  try{
-    for(const file of selected)if(file.size>40*1024*1024)throw new Error(`${file.name} exceeds the 40 MB file limit.`);
-    if(selected.some(file=>!file.name.toLowerCase().endsWith('.zip')&&!file.name.toLowerCase().endsWith('.csv')))throw new Error('Choose one ZIP archive or one or more CSV files.');
-    const archives=selected.filter(file=>file.name.toLowerCase().endsWith('.zip'));
-    if(archives.length>1||(archives.length===1&&selected.length!==1))throw new Error('Choose exactly one ZIP archive or a batch of CSV files for each profile.');
-    let files:any[]=[];let skippedPaths:string[]=[];let username:string|null=null;
-    if(archives.length===1){
-      const bytes=new Uint8Array(await archives[0].arrayBuffer());validateZipArchive(bytes);let archive:any;
-      try{archive=unzipSync(bytes,{filter:(entry:any)=>!entry.name.startsWith('/')&&!entry.name.split(/[\\/]/).includes('..')});}catch{throw new Error('This ZIP could not be opened. Try downloading the export again.');}
-      const csvEntries=Object.fromEntries(Object.entries(archive).filter(([name,content])=>name.toLowerCase().endsWith('.csv')&&(content as Uint8Array).length<=15*1024*1024));
-      const parsed=parseComparisonArchive(csvEntries);files=parsed.files;username=parsed.username;skippedPaths=parsed.skippedPaths;
-    }else{
-      let profileSeen=false;
-      for(const file of selected){
-        const filename=file.name.replace(/\\/g,'/').toLowerCase();
-        if(filename==='profile.csv'){if(!profileSeen){username=parseProfileUsername(await file.text());profileSeen=true;}continue;}
-        const type=classifyFile(file.name);
-        if(!['diary','ratings','watched','watchlist','reviews'].includes(type)){skippedPaths.push(file.name);continue;}
-        files.push({name:file.name,type,rows:parseCSV(await file.text())});
+  };
+  const applyMetadata = (key: string, metadata: any, token: number) => {
+    if (epoch.current !== token) return;
+    setData((d: any) =>
+      d
+        ? {
+            ...d,
+            films: d.films.map((f: any) =>
+              f.key === key ? { ...f, ...metadata } : f,
+            ),
+            watchlist: d.watchlist.map((f: any) =>
+              f.key === key ? { ...f, ...metadata } : f,
+            ),
+          }
+        : d,
+    );
+  };
+  const runEnrichment = async () => {
+    if (!data || !consent || !credential.trim() || enriching) return;
+    const token = epoch.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setEnriching(true);
+    setError("");
+    setEnrichmentProgress("Connecting to TMDB…");
+    setShowPosters(true);
+    try {
+      const request = createTMDBClient(credential, {
+        signal: controller.signal,
+      });
+      const all = [
+        ...new Map(
+          [...data.films, ...data.watchlist].map((f: any) => [f.key, f]),
+        ).values(),
+      ];
+      const res = await enrichFilms(all, request, {
+        signal: controller.signal,
+        limit: Number(batchLimit),
+        onFilm: (key: string, m: any) => applyMetadata(key, m, token),
+        onProgress: (p: any) => {
+          if (epoch.current === token)
+            setEnrichmentProgress(`${p.completed} / ${p.total}: ${p.title}`);
+        },
+      });
+      if (epoch.current === token)
+        setNotice(
+          `TMDB batch finished: ${res.completed} titles checked; ${res.remaining} not yet checked. Open a film to review or correct its match.`,
+        );
+    } catch (e: any) {
+      if (epoch.current === token) {
+        if (e.name === "AbortError")
+          setNotice("Metadata lookup stopped. Completed matches are retained.");
+        else
+          setError(
+            e.message || "TMDB lookup failed. Your local analysis is safe.",
+          );
+      }
+    } finally {
+      if (epoch.current === token) {
+        setEnriching(false);
+        setEnrichmentProgress("");
       }
     }
-    if(token!==comparisonReadToken.current[side])return;
-    const profile=buildComparisonProfile(files,username as any);
-    setComparisonSides((current:any)=>({...current,[side]:{profile,preview:files.map(file=>({name:file.name,type:file.type,rowCount:file.rows.length})),skippedPaths}}));
-    if(!profile.films.length)setComparisonError(`Profile ${side} needs at least one film record before comparison.`);
-  }catch(error:any){if(token!==comparisonReadToken.current[side])return;setComparisonError(error?.message||`Could not read Profile ${side}. Check the files and try again.`);}
-  finally{if(token===comparisonReadToken.current[side])setComparisonBusy((current:{A:boolean;B:boolean})=>({...current,[side]:false}));}
+  };
+  const correctMatch = async (film: any, id: number) => {
+    if (!credential.trim() || !consent) {
+      setError(
+        "Add your own TMDB key and enable metadata consent in Data & privacy before choosing a match.",
+      );
+      return;
+    }
+    if (!Number.isSafeInteger(id) || id < 1) {
+      setError("Enter a valid numeric TMDB movie ID.");
+      return;
+    }
+    setMatchBusy(true);
+    setError("");
+    const token = epoch.current,
+      controller = new AbortController();
+    controllerRef.current = controller;
+    try {
+      const req = createTMDBClient(credential, { signal: controller.signal });
+      const meta = metadataFromDetails(
+        await req(`movie/${id}`, { append_to_response: "credits" }),
+        "manually-confirmed",
+      );
+      applyMetadata(film.key, meta, token);
+      setShowPosters(true);
+      setNotice(
+        "TMDB match confirmed. Your imported title and personal ratings are unchanged.",
+      );
+    } catch (e: any) {
+      if (epoch.current === token)
+        setError(
+          e.name === "AbortError" ? "Match lookup cancelled." : e.message,
+        );
+    } finally {
+      if (epoch.current === token) setMatchBusy(false);
+    }
+  };
+  const removeMetadata = (film: any) => {
+    const keys = [
+      "tmdbId",
+      "tmdbTitle",
+      "posterUrl",
+      "genres",
+      "directors",
+      "cast",
+      "countries",
+      "languages",
+      "runtime",
+      "releaseDate",
+      "externalRating",
+      "voteCount",
+      "popularity",
+      "collection",
+      "overview",
+      "tmdbMatchConfidence",
+      "metadataAt",
+      "matchStatus",
+      "candidates",
+    ];
+    setData((d: any) => {
+      const clean = (f: any) => {
+        if (f.key !== film.key) return f;
+        const n = { ...f };
+        keys.forEach((k) => delete n[k]);
+        return n;
+      };
+      return {
+        ...d,
+        films: d.films.map(clean),
+        watchlist: d.watchlist.map(clean),
+      };
+    });
+    setNotice("Metadata removed for this film. It can be matched again.");
+  };
+  const clearAll = async () => {
+    userActed.current = true;
+    stopWork();
+    setRemember(false);
+    let storageFailure = "";
+    try {
+      await clearWorkspace();
+    } catch {
+      storageFailure =
+        "The current journal and credential are cleared, but this browser blocked storage access. Deletion of a previously saved copy could not be confirmed. Clear this site’s data in your browser settings to remove that copy.";
+    }
+    setData(null);
+    setCredential("");
+    setConsent(false);
+    setDetails(null);
+    setDrill(null);
+    setImportOpen(false);
+    setShowPosters(false);
+    setFilters(emptyFilters);
+    setConfirmClear(false);
+    setComparisonVersion((v) => v + 1);
+    setComparisonVisited(false);
+    setNotice(
+      storageFailure
+        ? "The current journal, comparison and session credential are cleared."
+        : "Imported data, saved analysis, comparison and TMDB credential cleared.",
+    );
+    setStorageMessage(
+      storageFailure
+        ? "Browser storage is unavailable; deletion of a previously saved copy could not be confirmed."
+        : "No analysis is saved on this device.",
+    );
+    go("overview");
+    if (storageFailure) setError(storageFailure);
+  };
+  const scopedViews = !["compare", "years", "settings", "watchlist"].includes(
+    active,
+  );
+  const filterCount = Object.values(filters).filter(Boolean).length;
+  return (
+    <MediaConsent.Provider value={showPosters}>
+      <a className="skip-link" href="#main-content">
+        Skip to analysis
+      </a>
+      <div className="app-shell">
+        {mobileNav && (
+          <button
+            className="nav-backdrop"
+            aria-label="Close navigation"
+            onClick={() => setMobileNav(false)}
+          />
+        )}
+        <aside
+          aria-label="Journal navigation"
+          className={`sidebar ${mobileNav ? "open" : ""}`}
+        >
+          <a
+            href="#main-content"
+            className="brand"
+            onClick={(e) => {
+              e.preventDefault();
+              go("overview");
+            }}
+          >
+            <span className="brand-mark">
+              <Clapperboard size={23} />
+            </span>
+            <span>
+              <strong>FRAME BY FRAME</strong>
+              <small>A LETTERBOXD JOURNAL</small>
+            </span>
+          </a>
+          <button
+            className="icon-btn mobile-close"
+            aria-label="Close navigation"
+            onClick={() => setMobileNav(false)}
+          >
+            <X size={20} />
+          </button>
+          <div className="sidebar-caption">YOUR SCREENING ROOM</div>
+          <nav aria-label="Main navigation">
+            {navigation.map(([id, label, Icon]) => (
+              <button
+                key={id}
+                aria-label={label}
+                aria-current={active === id ? "page" : undefined}
+                onClick={() => go(id)}
+              >
+                <Icon size={18} />
+                <span>{label}</span>
+                {id === "films" && data && <small>{data.films.length}</small>}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-bottom">
+            <p>
+              <ShieldCheck size={16} /> A private screening.
+            </p>
+            <small>
+              Your export stays in your browser. No account. No tracking.
+            </small>
+            <button className="text-btn" onClick={() => go("settings")}>
+              Your data controls <ArrowUpRight size={13} />
+            </button>
+            <span className="edition">PERSONAL EDITION / 2.0</span>
+          </div>
+        </aside>
+        <div className="workspace" inert={mobileNav}>
+          <header className="topbar">
+            <div className="topbar-title">
+              <button
+                className="icon-btn mobile-menu"
+                aria-label="Open navigation"
+                aria-expanded={mobileNav}
+                onClick={() => setMobileNav(!mobileNav)}
+              >
+                {mobileNav ? <X size={21} /> : <Menu size={21} />}
+              </button>
+              <span className="topbar-crumb">
+                Your journal <ChevronRight size={13} />
+                <strong>{navigation.find((n) => n[0] === active)?.[1]}</strong>
+              </span>
+            </div>
+            <div className="topbar-actions">
+              <span className="local-badge">
+                <i /> Local analysis
+              </span>
+              <button
+                className="icon-btn"
+                aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+                onClick={changeTheme}
+              >
+                {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <Button
+                aria-label="Import data"
+                onClick={() => {
+                  userActed.current = true;
+                  setImportOpen(true);
+                }}
+              >
+                <Upload size={16} />
+                <span>Import data</span>
+              </Button>
+            </div>
+          </header>
+          <main
+            id="main-content"
+            className="main-content"
+            ref={heading}
+            tabIndex={-1}
+          >
+            <div className="status-region" role="status" aria-live="polite">
+              {notice && (
+                <div className="notice">
+                  <CheckCircle2 size={17} />
+                  <span>{notice}</span>
+                  <button
+                    className="icon-btn"
+                    aria-label="Dismiss notification"
+                    onClick={() => setNotice("")}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              )}
+            </div>
+            {error && !details && (
+              <div className="notice error" role="alert">
+                <Info size={18} />
+                <span>{error}</span>
+                <button
+                  className="icon-btn"
+                  aria-label="Dismiss error"
+                  onClick={() => setError("")}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+            {data && scopedViews && (
+              <div className="filter-bar">
+                <div className="filter-caption">
+                  <span className="eyebrow">THE CURRENT CUT</span>
+                  <span>
+                    {scope.films.length.toLocaleString()} films ·{" "}
+                    {scope.diary.length.toLocaleString()} diary entries
+                  </span>
+                </div>
+                <div className="filters">
+                  <label>
+                    Diary year
+                    <select
+                      aria-label="Diary year"
+                      value={filters.year}
+                      onChange={(e) =>
+                        setFilters((s) => ({
+                          ...s,
+                          year: e.target.value,
+                          from: "",
+                          to: "",
+                        }))
+                      }
+                    >
+                      <option value="">All time</option>
+                      {allResult.activity.years.map((y: any) => (
+                        <option key={y.name}>{y.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    From
+                    <input
+                      type="date"
+                      value={filters.from}
+                      onChange={(e) =>
+                        setFilters((s) => ({
+                          ...s,
+                          year: "",
+                          from: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    To
+                    <input
+                      type="date"
+                      value={filters.to}
+                      min={filters.from || undefined}
+                      onChange={(e) =>
+                        setFilters((s) => ({
+                          ...s,
+                          year: "",
+                          to: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Personal rating
+                    <select
+                      value={filters.rating}
+                      onChange={(e) =>
+                        setFilters((s) => ({ ...s, rating: e.target.value }))
+                      }
+                    >
+                      <option value="">All ratings</option>
+                      {Array.from({ length: 10 }, (_, i) => (
+                        <option key={i} value={(i + 1) / 2}>
+                          {(i + 1) / 2} ★
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <details className="more-filters">
+                    <summary>
+                      More filters {filters.genre || filters.decade ? "•" : ""}
+                    </summary>
+                    <div>
+                      <label>
+                        TMDB genre
+                        <select
+                          value={filters.genre}
+                          onChange={(e) =>
+                            setFilters((s) => ({ ...s, genre: e.target.value }))
+                          }
+                        >
+                          <option value="">All genres</option>
+                          {allResult.genres.map((g: any) => (
+                            <option key={g.name}>{g.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Release decade
+                        <select
+                          value={filters.decade}
+                          onChange={(e) =>
+                            setFilters((s) => ({
+                              ...s,
+                              decade: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">All decades</option>
+                          {[...allResult.decadeAnalysis]
+                            .sort((a: any, b: any) =>
+                              a.name.localeCompare(b.name),
+                            )
+                            .map((d: any) => (
+                              <option key={d.name} value={d.name.slice(0, -1)}>
+                                {d.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    </div>
+                  </details>
+                  <button
+                    className="text-btn reset-filters"
+                    onClick={() => setFilters(emptyFilters)}
+                  >
+                    <RotateCcw size={13} /> Reset
+                    {filterCount ? ` (${filterCount})` : ""}
+                  </button>
+                </div>
+                {(filters.year || filters.from || filters.to) && (
+                  <p className="footnote">
+                    Date filters select diary events and the unique films behind
+                    them. Undated films are excluded; film ratings remain
+                    current.
+                  </p>
+                )}
+                {filters.from && filters.to && filters.from > filters.to && (
+                  <p role="alert" className="error-text">
+                    From is after To. Choose a valid range.
+                  </p>
+                )}
+              </div>
+            )}
+            {!data && !["compare", "settings"].includes(active) && (
+              <>
+                <section className="welcome">
+                  <div className="welcome-copy">
+                    <span className="eyebrow">YOUR FILM LIFE, IN FOCUS</span>
+                    <h1>
+                      Every film leaves
+                      <br />a <em>trace.</em>
+                    </h1>
+                    <p>
+                      Find the patterns in what you watch, the stories you
+                      return to, and the films that earn your stars.
+                    </p>
+                    <div className="welcome-actions">
+                      <Button primary onClick={() => setImportOpen(true)}>
+                        <Upload size={17} /> Analyze my Letterboxd data
+                      </Button>
+                      <button
+                        className="text-btn"
+                        onClick={() => go("compare")}
+                      >
+                        Compare two profiles <ArrowUpRight size={15} />
+                      </button>
+                    </div>
+                    <span className="welcome-privacy">
+                      <ShieldCheck size={16} /> No login. No uploads. Yours to
+                      explore.
+                    </span>
+                  </div>
+                  <div className="cover-art" aria-hidden="true">
+                    <div className="cover-index">
+                      A PERSONAL HISTORY
+                      <br />
+                      OF THE MOVING IMAGE
+                    </div>
+                    <div className="film-frame frame-one">
+                      <span>01</span>
+                      <Clapperboard size={56} />
+                      <small>THE FIRST IMPRESSION</small>
+                    </div>
+                    <div className="film-frame frame-two">
+                      <span>02</span>
+                      <Star size={58} />
+                      <small>THE LASTING FEELING</small>
+                    </div>
+                    <div className="cover-caption">
+                      A closer look at your life in cinema.
+                    </div>
+                  </div>
+                </section>
+                <div className="welcome-strip">
+                  <span>
+                    <ShieldCheck size={16} /> Local by default
+                  </span>
+                  <span>
+                    <Film size={16} /> No TMDB key required
+                  </span>
+                  <span>
+                    <Download size={16} /> Keep your analysis
+                  </span>
+                </div>
+                <div className="steps">
+                  {[
+                    [
+                      "01",
+                      "Export your journal",
+                      "Download your account ZIP from Letterboxd settings. Your diary, watched films and ratings belong here.",
+                    ],
+                    [
+                      "02",
+                      "Bring it into focus",
+                      "Choose the ZIP or extracted CSVs. We check dates, ratings and duplicates before you begin.",
+                    ],
+                    [
+                      "03",
+                      "Follow a thread",
+                      "Explore your viewing rhythm, rating fingerprint and personal film archive. Keep a backup when you leave.",
+                    ],
+                  ].map(([n, title, body]) => (
+                    <article key={n}>
+                      <span>{n}</span>
+                      <h2>{title}</h2>
+                      <p>{body}</p>
+                      {n === "01" ? (
+                        <a
+                          href="https://letterboxd.com/user/exportdata"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open Letterboxd export <ArrowUpRight size={13} />
+                        </a>
+                      ) : n === "02" ? (
+                        <button
+                          className="text-btn"
+                          onClick={() => setImportOpen(true)}
+                        >
+                          Choose your files <ArrowUpRight size={13} />
+                        </button>
+                      ) : (
+                        <button
+                          className="text-btn"
+                          disabled={snapshotBusy}
+                          onClick={() => restoreRef.current?.click()}
+                        >
+                          <FolderOpen size={14} />
+                          {snapshotBusy
+                            ? "Restoring…"
+                            : "Restore an analysis backup"}
+                        </button>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+            {data && result && active === "overview" && (
+              <Overview
+                scope={scope}
+                result={result}
+                onNavigate={go}
+                onFilm={onFilm}
+                onRating={onRating}
+                onYear={onYear}
+              />
+            )}
+            {data && active === "films" && (
+              <Explorer
+                key={JSON.stringify(filters)}
+                scope={scope}
+                onFilm={onFilm}
+                onExport={exportCSV}
+              />
+            )}
+            {data && active === "diary" && (
+              <Diary
+                key={JSON.stringify(filters)}
+                scope={scope}
+                result={result}
+                onFilm={onFilm}
+                onRange={onRange}
+              />
+            )}
+            {data && active === "ratings" && (
+              <Ratings
+                scope={scope}
+                result={result}
+                onFilm={onFilm}
+                onRating={onRating}
+                onDrill={onDrill}
+              />
+            )}
+            {data && active === "taste" && (
+              <Taste
+                scope={scope}
+                result={result}
+                onDrill={onDrill}
+                onNavigate={go}
+              />
+            )}
+            {data && active === "people" && (
+              <People scope={scope} result={result} onDrill={onDrill} />
+            )}
+            {data && active === "watchlist" && (
+              <Watchlist data={data} onFilm={onFilm} onExport={exportCSV} />
+            )}
+            {data && active === "years" && (
+              <YearCompare data={data} onFilm={onFilm} />
+            )}
+            {comparisonVisited && (
+              <div hidden={active !== "compare"}>
+                <Comparison key={comparisonVersion} />
+              </div>
+            )}
+            {active === "settings" && (
+              <>
+                <Title
+                  kicker="YOUR DATA, YOUR CALL"
+                  title="A private screening room."
+                >
+                  Understand your data, add optional metadata, and choose what
+                  stays on this device.
+                </Title>
+                <div className="two-col">
+                  <Section
+                    title="Keep your journal"
+                    sub="Saving is optional. By default your analysis stays in memory."
+                  >
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={remember}
+                        disabled={!data}
+                        onChange={async (e) => {
+                          const enabled = e.target.checked;
+                          setRemember(enabled);
+                          if (!enabled) {
+                            try {
+                              await clearWorkspace();
+                              setStorageMessage(
+                                "The saved copy was deleted. Your current session remains open.",
+                              );
+                            } catch (e: any) {
+                              setError(e.message);
+                            }
+                          }
+                        }}
+                      />
+                      Save analysis on this browser and device
+                    </label>
+                    <p className="body-copy">
+                      {storageMessage} Anyone with access to this browser
+                      profile can access a saved analysis. Browser cleanup may
+                      remove it.
+                    </p>
+                    <div className="button-row">
+                      <Button
+                        disabled={!data}
+                        onClick={() => {
+                          download(
+                            JSON.stringify(makeSnapshot(data), null, 2),
+                            "frame-by-frame-analysis.json",
+                          );
+                          setNotice(
+                            "Analysis backup downloaded. It contains film titles, ratings, diary and review data. Keep it private.",
+                          );
+                        }}
+                      >
+                        <Save size={16} /> Download analysis backup
+                      </Button>
+                      <Button
+                        disabled={snapshotBusy}
+                        onClick={() => restoreRef.current?.click()}
+                      >
+                        <FolderOpen size={16} />
+                        {snapshotBusy ? "Restoring…" : "Restore analysis"}
+                      </Button>
+                    </div>
+                  </Section>
+                  <Section
+                    title="Export the current cut"
+                    sub="Use these files outside the app."
+                  >
+                    <p className="body-copy">
+                      CSV contains the films in your current dashboard
+                      selection. The SVG report is a shareable image with your
+                      metrics and highest-rated titles. Backups always include
+                      the full import.
+                    </p>
+                    <div className="button-row">
+                      <Button
+                        disabled={!data}
+                        onClick={() => exportCSV(scope.films)}
+                      >
+                        <Download size={15} /> Filtered films CSV
+                      </Button>
+                      <Button
+                        disabled={!data}
+                        onClick={() =>
+                          download(
+                            reportSVG(
+                              scope,
+                              filters.year ||
+                                (filters.from || filters.to
+                                  ? "Selected period"
+                                  : "All time"),
+                              describeFilters(filters),
+                            ),
+                            "frame-by-frame-report.svg",
+                            "image/svg+xml",
+                          )
+                        }
+                      >
+                        <Download size={15} /> Movie report image
+                      </Button>
+                    </div>
+                    <p className="footnote">
+                      Downloaded files may contain personal viewing history.
+                      Clearing this app does not delete downloads.
+                    </p>
+                  </Section>
+                </div>
+                <Section
+                  title="Optional TMDB metadata"
+                  sub="Genres, people, runtimes, countries, original languages and posters."
+                >
+                  <div className="metadata-layout">
+                    <div>
+                      <p className="body-copy">
+                        Core analysis needs no API key. If you enable metadata,
+                        film titles, release years or provided film identifiers
+                        are sent directly to TMDB. Poster requests go to TMDB’s
+                        image service. Your archive, reviews and ratings are
+                        never sent.
+                      </p>
+                      <p className="body-copy">
+                        A static website cannot hide a secret. Use your own key
+                        or read access token; it remains in memory, is excluded
+                        from backups, and is cleared on reload. A v3 key is sent
+                        in the request URL; a read token uses an Authorization
+                        header.
+                      </p>
+                      <a
+                        href="https://www.themoviedb.org/settings/api"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Get your own TMDB credential <ArrowUpRight size={13} />
+                      </a>
+                    </div>
+                    <div className="metadata-form">
+                      <label htmlFor="tmdb-key">
+                        Your TMDB API key or read access token
+                      </label>
+                      <input
+                        id="tmdb-key"
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={credential}
+                        disabled={enriching || matchBusy}
+                        onChange={(e) => setCredential(e.target.value)}
+                        placeholder="Paste your personal TMDB credential"
+                      />
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={consent}
+                          onChange={(e) => {
+                            setConsent(e.target.checked);
+                            if (!e.target.checked) {
+                              controllerRef.current?.abort();
+                              setShowPosters(false);
+                            }
+                          }}
+                        />
+                        I choose to send film search terms to TMDB and load
+                        poster images.
+                      </label>
+                      <label>
+                        Batch size
+                        <select
+                          value={batchLimit}
+                          disabled={enriching}
+                          onChange={(e) => setBatchLimit(e.target.value)}
+                        >
+                          <option value="25">25 titles</option>
+                          <option value="100">100 titles</option>
+                          <option value="250">250 titles</option>
+                        </select>
+                      </label>
+                      <div className="button-row">
+                        <Button
+                          primary
+                          disabled={
+                            !data ||
+                            !credential.trim() ||
+                            !consent ||
+                            enriching ||
+                            matchBusy
+                          }
+                          onClick={runEnrichment}
+                        >
+                          Enrich next batch
+                        </Button>
+                        {enriching && (
+                          <Button
+                            onClick={() => controllerRef.current?.abort()}
+                          >
+                            Stop lookup
+                          </Button>
+                        )}
+                        <button
+                          className="text-btn"
+                          disabled={enriching || matchBusy}
+                          onClick={() => {
+                            setCredential("");
+                            setConsent(false);
+                          }}
+                        >
+                          Forget credential
+                        </button>
+                      </div>
+                      <p role="status" className="footnote">
+                        {enriching
+                          ? enrichmentProgress
+                          : data
+                            ? `${[...data.films, ...data.watchlist].filter((f: any) => f.tmdbId).length} matched records · ${[...data.films, ...data.watchlist].filter((f: any) => f.matchStatus === "review").length} need match review`
+                            : "Import films to enable metadata."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="metadata-footer">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={showPosters}
+                        onChange={(e) => setShowPosters(e.target.checked)}
+                      />
+                      Load external TMDB poster images
+                    </label>
+                    <p className="footnote">
+                      Matched metadata is cached in the current analysis and
+                      included in backups. Each batch skips already checked
+                      films. Open a film to choose another match or remove
+                      metadata to retry. Uncertain matches never contribute
+                      metadata analytics.
+                    </p>
+                  </div>
+                </Section>
+                {data && (
+                  <Section
+                    title="Import quality & coverage"
+                    sub="The full import, before dashboard filters."
+                  >
+                    <ImportReport data={data} onDownload={diagnostics} />
+                    <p className="footnote">
+                      Missing optional datasets:{" "}
+                      {data.missing?.length
+                        ? data.missing.map((t: string) => `${t}.csv`).join(", ")
+                        : "none"}
+                      .
+                    </p>
+                  </Section>
+                )}
+                <Section
+                  title="How your numbers are counted"
+                  sub="An audit trail for the entire dashboard."
+                >
+                  <div className="method-grid">
+                    <article>
+                      <h3>Films & identities</h3>
+                      <p>
+                        Distinct canonical Letterboxd film links are preferred.
+                        When a link is missing, normalized Unicode title and
+                        exact release year are used. Ambiguous same-title/year
+                        films cannot always be resolved without links. Watched,
+                        ratings, diary and reviews contribute films; watchlist
+                        stays separate.
+                      </p>
+                    </article>
+                    <article>
+                      <h3>Diary events & dates</h3>
+                      <p>
+                        Every accepted diary row is one event, even if identical
+                        to another row. Only Watched Date creates activity.
+                        Generic Date and release Year never create viewing
+                        dates. Rewatch counts use explicit flags; the absence of
+                        a flag does not prove a first watch.
+                      </p>
+                    </article>
+                    <article>
+                      <h3>Personal ratings</h3>
+                      <p>
+                        Only 0.5 to 5 stars in half-star steps. Current
+                        ratings.csv values override diary/review ratings; the
+                        latest valid Date wins within ratings.csv, then source
+                        row order. Without ratings.csv the latest rated diary
+                        event wins. Event rating trends keep each diary rating.
+                      </p>
+                    </article>
+                    <article>
+                      <h3>Categories & runtime</h3>
+                      <p>
+                        Metadata analytics use only matched films. Multi-genre
+                        films and co-productions count in each category. Actor
+                        counts cover the first ten billed cast members. Runtime
+                        sums exclude missing runtimes. Rankings by personal mean
+                        require at least three ratings per category.
+                      </p>
+                    </article>
+                    <article>
+                      <h3>Privacy & retention</h3>
+                      <p>
+                        There is no upload endpoint or analytics tracker. Source
+                        film CSV rows, including review text, are retained for
+                        backups. Profile fields other than Username are
+                        discarded. Save-on-device uses this site’s browser
+                        storage; comparison is never saved.
+                      </p>
+                    </article>
+                    <article>
+                      <h3>Scope & limitations</h3>
+                      <p>
+                        Date filters select diary events and their film set.
+                        Film means use current film ratings. Watchlist, year
+                        comparison, profile comparison and this settings page
+                        use the full import. Export gaps and unmatched metadata
+                        remain unknown; this app does not scrape Letterboxd.
+                      </p>
+                    </article>
+                  </div>
+                </Section>
+                <Section
+                  title="Clear your screening room"
+                  sub="Remove current imported data, the saved local copy, comparisons and the session credential."
+                >
+                  <Button
+                    onClick={() => setConfirmClear(true)}
+                    className="danger"
+                  >
+                    <Trash2 size={16} /> Clear all imported and saved data
+                  </Button>
+                  <p className="footnote">
+                    Your theme preference is kept. Downloaded files and copies
+                    stored elsewhere are unaffected.
+                  </p>
+                </Section>
+                <Section
+                  title="Credits & sources"
+                  sub="Independent, personal movie analytics."
+                >
+                  <p className="body-copy">
+                    Created and maintained by{" "}
+                    <a
+                      href="https://melvinvarghese.in"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Melvin Varghese
+                    </a>
+                    . Not affiliated with Letterboxd. No official Letterboxd API
+                    is used.
+                  </p>
+                  <a
+                    href="https://www.themoviedb.org/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      className="tmdb-logo"
+                      src={`${base}/tmdb.svg`}
+                      width="112"
+                      height="20"
+                      alt="TMDB"
+                    />
+                  </a>
+                  <p className="body-copy">
+                    This product uses the TMDB API but is not endorsed or
+                    certified by TMDB.
+                  </p>
+                  <p className="footnote">
+                    Film data and posters, when enabled, come from TMDB.
+                    Developer API use is subject to TMDB’s terms and attribution
+                    rules; commercial use requires separate licensing.{" "}
+                    <a
+                      href="https://www.themoviedb.org/api-terms-of-use"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Read TMDB terms ↗
+                    </a>
+                  </p>
+                </Section>
+              </>
+            )}
+            <footer className="footer">
+              <span>
+                FRAME BY FRAME <i> / </i> A PERSONAL FILM JOURNAL
+              </span>
+              <span>
+                By{" "}
+                <a
+                  href="https://melvinvarghese.in"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Melvin Varghese
+                </a>{" "}
+                · Independent of Letterboxd
+              </span>
+            </footer>
+          </main>
+        </div>
+      </div>
+      <input
+        ref={restoreRef}
+        className="sr-only"
+        type="file"
+        aria-label="Restore saved analysis JSON"
+        accept=".json,application/json"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void restore(file);
+          e.target.value = "";
+        }}
+      />
+      {importOpen && (
+        <Importer
+          onAccept={accept}
+          onClose={closeImport}
+          onDownload={diagnostics}
+        />
+      )}
+      {selectedFilm && (
+        <Modal title={selectedFilm.title} onClose={closeDetails} wide>
+          <div className="modal-body">
+            <div className="detail-hero">
+              <Poster film={selectedFilm} large />
+              <div>
+                <span className="eyebrow">
+                  {selectedFilm.year ?? "RELEASE YEAR UNKNOWN"}
+                </span>
+                <h3>{selectedFilm.title}</h3>
+                <p>
+                  {selectedFilm.directors?.join(" · ") ||
+                    "Director metadata not available"}
+                </p>
+                <div className="detail-ratings">
+                  <span>
+                    {selectedFilm.rating != null
+                      ? `${selectedFilm.rating}★`
+                      : "Unrated"}
+                    <small>Your current rating / 5</small>
+                  </span>
+                  <span>
+                    {selectedFilm.externalRating != null
+                      ? `${fmt(selectedFilm.externalRating, 1)}`
+                      : "—"}
+                    <small>
+                      TMDB / 10 · {selectedFilm.voteCount ?? 0} votes
+                    </small>
+                  </span>
+                </div>
+                {canonicalFilmURL(selectedFilm.url) && (
+                  <a
+                    href={canonicalFilmURL(selectedFilm.url)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open on Letterboxd <ArrowUpRight size={13} />
+                  </a>
+                )}
+                {selectedFilm.tmdbId && (
+                  <a
+                    href={`https://www.themoviedb.org/movie/${selectedFilm.tmdbId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    TMDB movie {selectedFilm.tmdbId} ↗
+                  </a>
+                )}
+              </div>
+            </div>
+            {selectedFilm.overview && (
+              <p className="body-copy">{selectedFilm.overview}</p>
+            )}
+            <dl className="film-facts">
+              <div>
+                <dt>Genres</dt>
+                <dd>{selectedFilm.genres?.join(", ") || "Unknown"}</dd>
+              </div>
+              <div>
+                <dt>Runtime</dt>
+                <dd>
+                  {selectedFilm.runtime
+                    ? `${selectedFilm.runtime} minutes`
+                    : "Unknown"}
+                </dd>
+              </div>
+              <div>
+                <dt>Production countries</dt>
+                <dd>{selectedFilm.countries?.join(", ") || "Unknown"}</dd>
+              </div>
+              <div>
+                <dt>Original language</dt>
+                <dd>{selectedFilm.languages?.join(", ") || "Unknown"}</dd>
+              </div>
+              <div>
+                <dt>TMDB release date</dt>
+                <dd>{selectedFilm.releaseDate || "Unknown"}</dd>
+              </div>
+              <div>
+                <dt>Match method</dt>
+                <dd>
+                  {selectedFilm.tmdbMatchConfidence ||
+                    selectedFilm.matchStatus ||
+                    "Not checked"}
+                </dd>
+              </div>
+            </dl>
+            {selectedFilm.cast?.length > 0 && (
+              <p className="body-copy">
+                <b>First ten billed cast:</b> {selectedFilm.cast.join(", ")}
+              </p>
+            )}
+            <h3 className="detail-heading">Your diary for this film</h3>
+            <p className="footnote">
+              {
+                (data?.diary || []).filter(
+                  (e: any) => e.key === selectedFilm.key,
+                ).length
+              }{" "}
+              imported events. Missing rewatch flags mean unknown.
+            </p>
+            <ul className="diary-events">
+              {(data?.diary || [])
+                .filter((e: any) => e.key === selectedFilm.key)
+                .slice(0, 200)
+                .map((e: any, i: number) => (
+                  <li key={i}>
+                    <span>{e.date || "Undated"}</span>
+                    <span>
+                      {e.rating != null ? `${e.rating}★` : "Unrated"} ·{" "}
+                      {e.rewatch ? "Rewatch flagged" : "No rewatch flag"}
+                    </span>
+                  </li>
+                ))}
+            </ul>
+            {(data?.diary || []).filter((e: any) => e.key === selectedFilm.key)
+              .length > 200 && (
+              <p className="footnote">
+                First 200 events displayed; all are retained in your analysis
+                backup.
+              </p>
+            )}
+            {selectedFilm.review && (
+              <details className="warnings">
+                <summary>Imported review text · may contain spoilers</summary>
+                <p className="review-text">{selectedFilm.review}</p>
+              </details>
+            )}
+            <details
+              className="warnings"
+              open={selectedFilm.matchStatus === "review"}
+            >
+              <summary>Review or correct the TMDB match</summary>
+              <p className="body-copy">
+                {selectedFilm.matchStatus === "review"
+                  ? "The match is uncertain. Choose a candidate or provide a TMDB movie ID; metadata is excluded until confirmed."
+                  : "Confirm a candidate or enter the numeric movie ID from a TMDB movie page. Your Letterboxd title stays unchanged."}
+              </p>
+              {error && (
+                <p className="notice error" role="alert">
+                  {error}
+                </p>
+              )}
+              {credential.trim() && consent ? (
+                <>
+                  <div className="match-candidates">
+                    {selectedFilm.candidates?.map((c: any) => (
+                      <Button
+                        key={c.id}
+                        disabled={matchBusy || enriching}
+                        onClick={() => correctMatch(selectedFilm, c.id)}
+                      >
+                        {c.title} ({c.year ?? "?"}) · Use ID {c.id}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="manual-match">
+                    <label htmlFor="manual-tmdb">
+                      TMDB movie ID
+                      <input
+                        id="manual-tmdb"
+                        inputMode="numeric"
+                        pattern="[0-9]+"
+                        value={manualId}
+                        onChange={(e) => setManualId(e.target.value)}
+                        placeholder="e.g. 550"
+                      />
+                    </label>
+                    <Button
+                      disabled={
+                        !/^\d+$/.test(manualId) || matchBusy || enriching
+                      }
+                      onClick={() =>
+                        correctMatch(selectedFilm, Number(manualId))
+                      }
+                    >
+                      {matchBusy ? "Looking up…" : "Use this movie ID"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <Button
+                  onClick={() => {
+                    closeDetails();
+                    go("settings");
+                  }}
+                >
+                  Enable TMDB in Data & privacy
+                </Button>
+              )}
+              {(selectedFilm.tmdbId || selectedFilm.metadataAt) && (
+                <button
+                  className="text-btn"
+                  disabled={enriching || matchBusy}
+                  onClick={() => removeMetadata(selectedFilm)}
+                >
+                  Remove metadata and allow retry
+                </button>
+              )}
+            </details>
+            <p className="footnote">
+              TMDB data is a separate source. This product uses the TMDB API but
+              is not endorsed or certified by TMDB.
+            </p>
+          </div>
+        </Modal>
+      )}
+      {drill && (
+        <Modal title={drill.title} onClose={closeDrill} wide>
+          <div className="modal-body">
+            <p className="body-copy">
+              {drill.films.length} films in this result. Open a title for its
+              diary and metadata.
+            </p>
+            <FilmList
+              films={drill.films.slice((drillPage - 1) * 30, drillPage * 30)}
+              limit={30}
+              onFilm={(f: any) => {
+                setDrill(null);
+                onFilm(f);
+              }}
+            />
+            <Pager
+              page={drillPage}
+              total={drill.films.length}
+              onPage={setDrillPage}
+            />
+            <Button onClick={() => exportCSV(drill.films)}>
+              <Download size={15} /> Export these films
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {confirmClear && (
+        <Modal
+          title="Clear all imported and saved data?"
+          onClose={() => setConfirmClear(false)}
+        >
+          <div className="modal-body">
+            <p className="body-copy">
+              This removes the current analysis, the copy saved in this browser,
+              comparisons, and your session TMDB credential. Download a backup
+              first if you want to keep your work.
+            </p>
+            <div className="button-row">
+              <Button onClick={() => setConfirmClear(false)}>
+                Keep my analysis
+              </Button>
+              <Button className="danger" onClick={clearAll}>
+                Clear all data
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </MediaConsent.Provider>
+  );
 }
-function compareImportedProfiles(){if(!comparisonReady)return;setComparisonResult(compareProfiles(comparisonSides.A.profile,comparisonSides.B.profile));setComparisonError('');}
-function clearComparison(){comparisonReadToken.current.A++;comparisonReadToken.current.B++;setComparisonSides({A:null,B:null});setComparisonResult(null);setComparisonError('');setComparisonBusy({A:false,B:false});}
-function clearSession(){setData(null);setFiles([]);setPreview([]);setSkippedPaths([]);setMessageError(false);setTmdbApiKey('');clearComparison();setActive('Overview');setMessage('Current in-memory dataset, comparison pair, and TMDB key cleared from app state.');}
-function downloadReport(){if(!data)return;const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),statistics:stats,films:data.films,watchlist:data.watchlist},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='letterboxd-analysis.json';a.click();URL.revokeObjectURL(url);}
-const uniqueDirectors=useMemo(()=>{const m=new Map<string,{name:string,count:number,total:number,n:number}>();for(const f of films){if(!f.director)continue;const d=m.get(f.director)||{name:f.director,count:0,total:0,n:0};d.count++;if(f.rating!=null){d.total+=f.rating;d.n++;}m.set(f.director,d);}return [...m.values()].sort((a,b)=>b.count-a.count);},[films]);
-return <main className="min-h-screen"><aside className="fixed left-0 top-0 z-20 hidden h-screen w-[248px] flex-col border-r border-line bg-background px-5 py-6 lg:flex"><div className="flex items-center gap-3 px-2"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-green text-background"><Clapperboard size={23}/></div><div><div className="font-bold tracking-tight">FRAME BY FRAME</div><div className="text-[10px] tracking-[.22em] text-muted">LETTERBOXD ANALYTICS</div></div></div><button onClick={e=>openImport(e.currentTarget)} className="mt-9 flex items-center justify-center gap-2 rounded-xl bg-button-green px-3 py-3 text-sm font-bold text-background transition-colors hover:bg-button-hover active:bg-button-active"><Upload size={16}/> Import your data</button><div className="mb-2 mt-8 px-3 text-[10px] font-bold uppercase tracking-[.2em] text-muted">Workspace</div><nav className="space-y-1">{nav.map(([name,Icon])=><button key={name} onClick={()=>setActive(name)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${active===name?'bg-raised text-primary-green':'text-body hover:bg-surface hover:text-primary'}`}><Icon size={17}/>{name}{name==='Overview'&&data&&<span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary-green"/>}</button>)}</nav><div className="mt-auto rounded-xl border border-line bg-surface p-4"><div className="mb-2 flex items-center gap-2 text-sm"><ShieldCheck size={16} className="text-primary-green"/> Private by design</div><p className="text-xs leading-5 text-body">Your imported files are processed in this browser. Nothing is uploaded to an analytics server.</p><button onClick={()=>setActive('Settings & privacy')} className="mt-3 text-xs text-primary-green">Privacy controls ↗</button></div></aside>
-<div className="lg:pl-[248px]"><header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-header px-5 py-4 backdrop-blur md:px-8"><div><div className="text-xs text-muted">YOUR CINEMATIC JOURNAL</div><div className="mt-1 text-lg font-semibold">{active}</div></div><div className="flex items-center gap-2"><button ref={importFallbackRef} onClick={e=>openImport(e.currentTarget)} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm hover:border-primary-green"><Upload size={15}/><span className="hidden sm:inline">Import data</span></button><button onClick={downloadReport} disabled={!data} title="Export analysis" className="rounded-lg border border-line p-2 disabled:opacity-30"><ArrowDownToLine size={17}/></button></div></header>
-<div className="px-5 py-7 md:px-8 md:py-9"><div className="mb-6 flex gap-2 overflow-x-auto pb-2 lg:hidden">{nav.map(([name,Icon])=><button key={name} onClick={()=>setActive(name)} className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs ${active===name?'border-primary-green text-primary-green':'border-line text-body'}`}><Icon size={14}/>{name}</button>)}</div>
-{!showImport&&message&&<div role={messageError?'alert':'status'} className={`mb-5 flex items-start gap-2 rounded-xl border px-4 py-3 text-sm ${messageError?'border-error-border bg-error-surface text-error-text':'border-line bg-surface text-body'}`}><Info size={17} className={`mt-0.5 shrink-0 ${messageError?'text-error-icon':'text-primary-green'}`}/><span>{message}</span><button aria-label="Dismiss message" className="ml-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green" onClick={()=>setMessage('')}><X size={15}/></button></div>}
-{((!data&&active!=='Compare profiles')||active==='Overview')&&<><section className="relative mb-7 overflow-hidden rounded-2xl border border-line bg-surface p-6 md:p-9"><div className="absolute -right-12 -top-24 h-64 w-64 rounded-full border border-line"/><div className="absolute -right-2 -top-14 h-44 w-44 rounded-full border border-line"/><div className="relative max-w-2xl"><div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[.2em] text-primary-green"><span className="h-px w-6 bg-primary-green"/> YOUR FILM LIFE, DECODED</div><h1 className="max-w-xl text-3xl font-semibold leading-tight tracking-tight md:text-5xl">Every film leaves a trace.<br/><span className="text-primary-green">Find your pattern.</span></h1><p className="mt-4 max-w-lg text-sm leading-6 text-body md:text-base">A thoughtful deep dive into what you watch, what you rate, and the stories that stay with you. Your data stays yours.</p><div className="mt-7 flex flex-wrap gap-3"><button onClick={e=>openImport(e.currentTarget)} className="flex items-center gap-2 rounded-lg bg-button-green px-4 py-3 text-sm font-bold text-background transition-colors hover:bg-button-hover active:bg-button-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green"><Upload size={16}/> Analyze my Letterboxd data</button><button onClick={()=>setActive('Compare profiles')} className="flex items-center gap-2 rounded-lg border border-line px-4 py-3 text-sm font-semibold text-primary hover:border-primary-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green"><Layers3 size={16}/> Compare two profiles</button></div><div className="mt-5 flex items-center gap-2 text-xs text-body"><ShieldCheck size={14} className="text-primary-green"/> No login. No passwords. Local-first analysis.</div></div></section>{!data&&<><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Start with your own data</h2><p className="mt-1 text-sm text-body">Export from Letterboxd settings, then import the ZIP.</p></div><span className="rounded-full border border-line px-3 py-1 text-xs text-body">2 min setup</span></div><div className="grid gap-4 md:grid-cols-3"><div className="panel p-5"><div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-raised text-primary-green"><FileArchive size={20}/></div><h3 className="font-semibold">01 · Export</h3><p className="mt-2 text-sm leading-6 text-body">In Letterboxd, open Settings and request your account data export ZIP.</p><a href="https://letterboxd.com/user/exportdata" target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-link hover:text-link-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green">Open Letterboxd settings <ArrowUpRight size={13}/></a></div><div className="panel p-5"><div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-raised text-primary-green"><Database size={20}/></div><h3 className="font-semibold">02 · Import</h3><p className="mt-2 text-sm leading-6 text-body">Drop the ZIP or select individual diary, ratings, watched, and watchlist CSV files.</p><button onClick={e=>openImport(e.currentTarget)} className="mt-4 text-xs text-primary-green">Choose files ↗</button></div><div className="panel p-5"><div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-raised text-primary-green"><BarChart3 size={20}/></div><h3 className="font-semibold">03 · Discover</h3><p className="mt-2 text-sm leading-6 text-body">Explore your rating curve, viewing years, rewatch habits, and taste signals.</p></div></div></>}</>}
-{data&&result&&stats&&active==='Overview'&&<><div className="mb-7 flex flex-wrap items-end justify-between gap-3"><div><div className="mb-2 text-xs uppercase tracking-[.18em] text-primary-green">THE BIG PICTURE</div><h1 className="text-2xl font-semibold md:text-3xl">Your year in cinema, at a glance.</h1><p className="mt-2 text-sm text-body">Based only on the data available in your import. No guesses, no invented stats.</p></div><div className="rounded-lg border border-line px-3 py-2 text-xs text-body">{stats?.firstDiaryDate||'No diary dates'} — {stats?.lastDiaryDate||'No diary dates'}</div></div><div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[{label:'Unique films',value:stats.uniqueFilms,icon:Film,sub:'Matched title + year'},{label:'Diary entries',value:stats.diaryEntries,icon:CalendarDays,sub:'Recorded viewings'},{label:'Films rated',value:stats.ratedFilms,icon:Star,sub:'With personal ratings'},{label:'Average rating',value:stats.average===null?'—':`${fmt(stats.average)} / 5`,icon:Heart,sub:stats.median===null?'Median unavailable':`Median ${fmt(stats.median)}`}].map((k,i)=><div key={k.label} className="panel p-4 md:p-5"><div className="flex items-center justify-between"><span className="text-xs text-body md:text-sm">{k.label}</span><k.icon size={17} className="text-primary-green"/></div><div className="mt-4 text-2xl font-semibold md:text-3xl">{k.value}</div><div className="mt-2 text-[11px] text-secondary">{k.sub}</div></div>)}</div><div className="panel mt-5 p-5"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Data coverage</h2><p className="mt-1 text-xs text-body">Detected source files and records included in this analysis</p></div><Database size={18} className="text-primary-green"/></div><div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">{Object.entries(data.counts||{}).map(([kind,count]:any)=><div key={kind} className="rounded-lg border border-line p-3"><div className="text-xs capitalize text-body">{kind}</div><div className="mt-2 text-xl font-semibold">{count}</div><div className="mt-1 text-[10px] text-secondary">source rows detected</div></div>)}<div className="rounded-lg border border-line p-3"><div className="text-xs text-body">Films with diary date</div><div className="mt-2 text-xl font-semibold">{films.filter((f:any)=>f.date).length}</div><div className="mt-1 text-[10px] text-secondary">unique film records</div></div><div className="rounded-lg border border-line p-3"><div className="text-xs text-body">Rated share</div><div className="mt-2 text-xl font-semibold">{films.length?Math.round(stats.ratedFilms/films.length*100):0}%</div><div className="mt-1 text-[10px] text-secondary">unique film records</div></div></div><p className="mt-3 text-xs leading-5 text-body">Coverage reflects recognized CSV rows, not a guarantee that the export includes every Letterboxd activity. Watchlist and list entries are not included in watched-film totals.</p></div><div className="mt-5 grid gap-5 xl:grid-cols-5"><div className="panel p-5 xl:col-span-3"><div className="flex items-start justify-between"><div><h2 className="font-semibold">Your rating fingerprint</h2><p className="mt-1 text-xs text-body">How your personal ratings are distributed</p></div><Star size={18} className="text-primary-green"/></div><div className="mt-4 h-[250px]">{stats.ratedFilms?<ResponsiveContainer width="100%" height="100%"><BarChart data={ratedByRating}><CartesianGrid stroke="var(--color-border)" vertical={false}/><XAxis dataKey="rating" tick={{fill:'var(--color-text-body)',fontSize:11}} tickLine={false} axisLine={false} tickFormatter={(n)=>`${n}★`}/><YAxis allowDecimals={false} tick={{fill:'var(--color-text-body)',fontSize:11}} tickLine={false} axisLine={false}/><Tooltip labelStyle={{color:'var(--color-text-primary)'}} itemStyle={{color:'var(--color-text-primary)'}} contentStyle={{background:'var(--color-surface)',border:'1px solid var(--color-border)',borderRadius:8,color:'var(--color-text-primary)'}} labelFormatter={v=>`${v} stars`} /><Bar dataKey="count" name="Films" fill="var(--color-chart-personal)" radius={[5,5,0,0]} maxBarSize={34}/></BarChart></ResponsiveContainer>:<Empty text="No personal ratings were found in this import."/>}</div></div><div className="panel p-5 xl:col-span-2"><h2 className="font-semibold">Your viewing years</h2><p className="mt-1 text-xs text-body">Diary entries by recorded year</p><div className="mt-4 h-[250px]">{diaryByYear.length?<ResponsiveContainer width="100%" height="100%"><AreaChart data={diaryByYear}><defs><linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--color-chart-personal)" stopOpacity={.3}/><stop offset="95%" stopColor="var(--color-chart-personal)" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="var(--color-border)" vertical={false}/><XAxis dataKey="year" tick={{fill:'var(--color-text-body)',fontSize:10}} tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tick={{fill:'var(--color-text-body)',fontSize:10}} tickLine={false} axisLine={false}/><Tooltip labelStyle={{color:'var(--color-text-primary)'}} itemStyle={{color:'var(--color-text-primary)'}} contentStyle={{background:'var(--color-surface)',border:'1px solid var(--color-border)',borderRadius:8}}/><Area dataKey="count" name="Diary entries" stroke="var(--color-chart-personal)" fill="url(#areaFill)" strokeWidth={2}/></AreaChart></ResponsiveContainer>:<Empty text="Diary dates are needed to build a timeline."/>}</div></div></div><div className="mt-5 grid gap-5 lg:grid-cols-2"><div className="panel p-5"><h2 className="font-semibold">What the data says</h2><p className="mt-1 text-xs text-body">Rule-based observations, with their evidence attached</p><div className="mt-4 space-y-3">{result.insights.length?result.insights.map((ins:any,i:number)=><div key={i} className="rounded-xl border border-line p-4"><div className="flex items-center gap-2 text-sm font-semibold"><Sparkles size={15} className="text-primary-green"/>{ins.title}</div><p className="mt-2 text-sm leading-6 text-body">{ins.detail}</p><p className="mt-2 text-[11px] text-secondary">n={ins.sampleSize} · {ins.method}</p></div>):<Empty text="Import more data to reveal insights."/>}</div></div><div className="panel p-5"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Recently recorded films</h2><p className="mt-1 text-xs text-body">Sorted by diary date when available</p></div><button onClick={()=>setActive('Film explorer')} className="text-xs text-primary-green">Explore all ↗</button></div><div className="mt-4 space-y-1">{[...films].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).slice(0,5).map((f,i)=><div key={f.id||f.title+i} className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-raised"><div className="flex h-10 w-8 shrink-0 items-center justify-center rounded bg-poster text-xs text-secondary"><Film size={15}/></div><div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{f.title}</div><div className="mt-1 text-xs text-body">{f.year||'Year unknown'} {f.date?`· ${f.date}`:''}</div></div><div className="flex items-center gap-1 text-sm text-primary-green">{f.rating??'—'}{f.rating!=null&&<Star size={12} fill="currentColor"/>}</div></div>)}</div></div></div></>}
-{data&&stats&&active==='Taste analysis'&&<><PageTitle kicker="YOUR CINEMATIC DNA" title="Taste is a pattern, not a genre." sub="Separate what you watch often from what you rate highly. Genre metadata appears when it exists in the imported dataset or is enriched later."/><div className="grid gap-5 lg:grid-cols-2"><div className="panel p-5"><h2 className="font-semibold">Release decades</h2><p className="mt-1 text-xs text-body">Based on release year, not viewing date</p><div className="mt-4 h-64"><ResponsiveContainer width="100%" height="100%"><BarChart data={stats.decades}><CartesianGrid stroke="var(--color-border)" vertical={false}/><XAxis dataKey="name" tick={{fill:'var(--color-text-body)',fontSize:11}}/><YAxis allowDecimals={false} tick={{fill:'var(--color-text-body)',fontSize:11}}/><Tooltip labelStyle={{color:'var(--color-text-primary)'}} itemStyle={{color:'var(--color-text-primary)'}} contentStyle={{background:'var(--color-surface)',border:'1px solid var(--color-border)'}}/><Bar dataKey="count" name="Films" fill="var(--color-chart-personal)" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer></div></div><div className="panel p-5"><h2 className="font-semibold">Rating behaviour</h2><div className="mt-5 grid grid-cols-2 gap-3"><Metric label="Mean" value={fmt(stats.average)}/><Metric label="Median" value={fmt(stats.median)}/><Metric label="Rated films" value={stats.ratedFilms}/><Metric label="Unrated" value={Math.max(0,films.length-stats.ratedFilms)}/></div><p className="mt-4 text-xs leading-5 text-body">Ratings are used exactly as imported. Missing ratings are excluded; watchlist entries are not counted as watched films.</p></div></div><div className="panel mt-5 p-5"><h2 className="font-semibold">Genre analysis</h2><p className="mt-1 text-xs text-body">Genre labels and matched-film counts are from TMDB. Ratings are from your imported Letterboxd data.</p>{result?.genreAnalysis?.length?<div className="mt-4 overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm"><thead className="text-xs text-body"><tr className="border-b border-line"><th className="pb-3 font-medium">TMDB genre</th><th className="pb-3 font-medium">Matched films (TMDB)</th><th className="pb-3 font-medium">Rated films (Letterboxd)</th><th className="pb-3 font-medium">Average rating (Letterboxd)</th></tr></thead><tbody>{result.genreAnalysis.map((genre:any)=><tr key={genre.name} className="border-b border-line last:border-0"><td className="py-3 pr-3 font-medium">{genre.name}</td><td className="py-3 text-body">{genre.matchedFilms}</td><td className="py-3 text-body">{genre.ratedFilms}</td><td className="py-3 text-primary-green">{genre.averageRating===null?'—':`${genre.averageRating.toFixed(2)} / 5`}</td></tr>)}</tbody></table></div>:<Empty text="No TMDB-matched films with genre labels yet. Add optional metadata enrichment during import to see this breakdown."/>}</div></>}
-{data&&active==='Directors & actors'&&<><PageTitle kicker="THE PEOPLE BEHIND YOUR PICKS" title="The filmmakers in your orbit." sub="Director and cast analytics require matched external metadata. No names are guessed from film titles."/><div className="panel p-5"><h2 className="font-semibold">Directors in the current dataset</h2>{uniqueDirectors.length?<div className="mt-4 space-y-2">{uniqueDirectors.map(d=><div key={d.name} className="flex items-center gap-3 rounded-lg border border-line p-3"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-raised text-primary-green"><Users size={16}/></div><div className="flex-1"><div className="text-sm font-medium">{d.name}</div><div className="text-xs text-body">{d.count} films · {d.n} rated</div></div><div className="text-sm text-primary-green">{d.n?`${(d.total/d.n).toFixed(2)} ★`:'—'}</div></div>)}</div>:<Empty text="Director data is not included in a standard Letterboxd export. Enable TMDB enrichment to populate it."/>}<div className="mt-4 rounded-lg bg-raised p-3 text-xs leading-5 text-body">Highest-rated director comparisons require at least 3 rated films per director to avoid over-interpreting small samples.</div></div></>}
-{data&&stats&&active==='Timeline'&&<><PageTitle kicker="TIME IN THE DARK" title="Your viewing, over time." sub="Only recorded diary dates are used. Films marked watched without a date do not create an artificial timeline."/><div className="panel p-5"><h2 className="font-semibold">Diary activity by year</h2><div className="mt-5 h-80">{diaryByYear.length?<ResponsiveContainer width="100%" height="100%"><BarChart data={diaryByYear}><CartesianGrid stroke="var(--color-border)" vertical={false}/><XAxis dataKey="year" tick={{fill:'var(--color-text-body)'}}/><YAxis allowDecimals={false} tick={{fill:'var(--color-text-body)'}}/><Tooltip labelStyle={{color:'var(--color-text-primary)'}} itemStyle={{color:'var(--color-text-primary)'}} contentStyle={{background:'var(--color-surface)',border:'1px solid var(--color-border)'}}/><Bar dataKey="count" fill="var(--color-chart-personal)" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>:<Empty text="No reliable diary dates were found."/>}</div></div><div className="mt-4 grid gap-4 md:grid-cols-3"><Metric label="First recorded date" value={stats.firstDiaryDate||'—'}/><Metric label="Last recorded date" value={stats.lastDiaryDate||'—'}/><Metric label="Diary entries" value={stats.diaryEntries}/></div></>}
-{data&&active==='Film explorer'&&<><PageTitle kicker="THE PERSONAL ARCHIVE" title="Every title, one place." sub={`${films.length} unique film records in the current import. Search and sort your own data.`}/>{data.tmdbSearchedCount!==undefined&&<p className="mb-3 text-xs text-body">TMDB matched <span className="font-semibold text-primary">{data.tmdbMatchedCount}</span> of {data.tmdbSearchedCount} searched films.</p>}<div className="panel p-4"><div className="flex flex-col gap-3 md:flex-row"><div className="relative flex-1"><Search size={16} className="absolute left-3 top-3 text-body"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search title, year, director…" className="w-full rounded-lg border border-line bg-surface py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary-green"/></div><select value={filter} onChange={e=>setFilter(e.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm"><option>All films</option><option>Rated</option><option>Unrated</option><option>Rewatches</option></select><select value={sort} onChange={e=>setSort(e.target.value)} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm"><option>Title A–Z</option><option>Highest rated</option><option>Newest year</option></select></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="text-xs text-body"><tr className="border-b border-line"><th className="pb-3 font-medium">FILM</th><th className="pb-3 font-medium">YEAR</th><th className="pb-3 font-medium">YOUR RATING</th><th className="pb-3 font-medium">TMDB RATING</th><th className="pb-3 font-medium">TMDB RELEASE DATE</th><th className="pb-3 font-medium">DIARY DATE</th><th className="pb-3 font-medium">REWATCH</th></tr></thead><tbody>{filteredFilms.slice(0,100).map((f,i)=><tr key={f.id||f.title+i} className="border-b border-line last:border-0"><td className="py-3 pr-3"><div className="flex items-center gap-3">{f.posterUrl?<img src={f.posterUrl} alt={`TMDB poster: ${f.title}`} loading="lazy" className="h-20 w-14 shrink-0 rounded bg-poster object-cover"/>:<div aria-hidden="true" className="flex h-20 w-14 shrink-0 items-center justify-center rounded bg-poster text-secondary"><Film size={16}/></div>}<div className="min-w-0"><div className="font-medium">{f.title}</div>{f.genres?.length>0&&<div className="mt-1 text-xs text-body">{f.genres.join(' · ')}</div>}<div className="mt-1 text-xs text-body">{f.director||'Director not available'}</div></div></div></td><td className="py-3 text-body">{f.year||'—'}</td><td className="py-3 text-primary-green">{f.rating??'—'}{f.rating!=null?' ★':''}</td><td className="py-3 text-body">{f.externalRating!=null?`${f.externalRating.toFixed(1)} / 10`:'—'}</td><td className="py-3 text-body">{f.releaseDate||'—'}</td><td className="py-3 text-body">{f.date||'—'}</td><td className="py-3 text-body">{f.rewatchCount?`Yes (${f.rewatchCount})`:'—'}</td></tr>)}</tbody></table>{!filteredFilms.length&&<Empty text="No films match these filters."/>}<div className="pt-3 text-xs text-body">Showing {Math.min(filteredFilms.length,100)} of {filteredFilms.length} matching films.</div></div></div></>}
-{data&&active==='Watchlist'&&<><PageTitle kicker="THE FUTURE WATCHED" title="Stories still waiting." sub="Watchlist items are kept separate from your watched films and personal ratings."/><div className="grid gap-4 md:grid-cols-3"><Metric label="Watchlist titles" value={data.watchlist.length}/><Metric label="Matched to watched films" value={data.watchlist.filter((w:any)=>films.some((f:any)=>f.normalizedTitle===w.normalizedTitle)).length}/><Metric label="Personal ratings" value="Not inferred"/></div><div className="panel mt-5 p-5">{data.watchlist.length?<div className="space-y-3">{data.watchlist.map((f:any,i:number)=><div key={f.id||f.title+i} className="flex items-center gap-3 border-b border-line pb-3 last:border-0"><Bookmark size={18} className="text-primary-green"/><div><div className="text-sm font-medium">{f.title}</div><div className="mt-1 text-xs text-body">{f.year||'Year unknown'} · Watchlist</div></div></div>)}</div>:<Empty text="No watchlist CSV was detected. Import watchlist.csv from the Letterboxd export to enable this section."/>}</div></>}
-{data&&active==='Recommendations'&&<><PageTitle kicker="THE NEXT FRAME" title="A watchlist shaped by your taste." sub="Recommendations must have explainable evidence. This version uses only imported information and does not fabricate external matches."/><div className="panel p-5"><div className="mb-4 flex items-center gap-2 text-sm font-semibold"><Sparkles size={17} className="text-primary-green"/>Watchlist-first suggestions</div>{data.watchlist.length?<div className="space-y-3">{data.watchlist.map((f:any,i:number)=><div key={f.id||f.title+i} className="rounded-xl border border-line p-4"><div className="font-medium">{f.title} <span className="text-xs text-body">({f.year||'year unknown'})</span></div><p className="mt-2 text-sm text-body">On your watchlist. Add film metadata to evaluate genre, director, and similarity to highly rated films.</p><div className="mt-2 text-[11px] text-body">Evidence: watchlist import · Personal rating: not available</div></div>)}</div>:<Empty text="Import watchlist.csv to get watchlist-aware suggestions. External candidate discovery is not enabled yet."/>}</div></>}
-{active==='Compare profiles'&&<><PageTitle kicker="TWO TASTES, SIDE BY SIDE" title="Compare two film journals." sub="Import two separate exports. Matching uses normalized title and release year; your files stay in this browser."/><div className="mb-5 flex items-start gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-body"><ShieldCheck size={17} className="mt-0.5 shrink-0 text-primary-green"/><p>Only the Username from each profile file is used as a label. Comparison does not change your single-profile analysis.</p></div>{comparisonError&&<div role="alert" className="mb-5 rounded-xl border border-error-border bg-error-surface px-4 py-3 text-sm text-error-text">{comparisonError}</div>}<div className="grid gap-4 md:grid-cols-2">{(['A','B'] as const).map(side=>{const label=side==='A'?'Profile A':'Profile B',state=comparisonSides[side],inputRef=side==='A'?comparisonAFileRef:comparisonBFileRef;return <section key={side} className="panel p-5"><div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{label}</h2><p className="mt-1 break-all text-sm text-body">{state?.profile.username||'Username unavailable'}</p></div><span className="rounded-full border border-line px-2.5 py-1 text-xs text-body">{state?.profile.films.length||0} films</span></div><input ref={inputRef} type="file" accept=".zip,.csv" multiple aria-label={`Choose files for ${label}`} className="sr-only" onChange={event=>{void readComparisonFiles(event.target.files,side);event.target.value='';}}/><button onClick={()=>{if(!comparisonBusy[side])inputRef.current?.click();}} aria-disabled={comparisonBusy[side]} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-line px-3 py-2.5 text-sm text-primary hover:border-primary-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green"><Upload size={15}/>{comparisonBusy[side]?'Reading files…':`Choose ${label} files`}</button><p className="mt-2 text-xs leading-5 text-body">Choose one Letterboxd ZIP or a batch of CSV files. Do not mix ZIPs and CSVs.</p>{state&&<div className="mt-4 border-t border-line pt-3"><h3 className="text-xs font-semibold text-body">Imported files</h3>{state.preview.length?<ul className="mt-2 space-y-1">{state.preview.map((file:any,index:number)=><li key={`${file.name}-${index}`} className="flex justify-between gap-3 text-xs text-body"><span className="min-w-0 truncate">{file.name} · {file.type}</span><span className="shrink-0">{file.rowCount} rows</span></li>)}</ul>:<p className="mt-2 text-xs text-body">No film data files recognized.</p>}{state.skippedPaths.length>0&&<details className="mt-3 text-xs text-body"><summary className="cursor-pointer">Ignored paths ({state.skippedPaths.length})</summary><ul className="mt-2 space-y-1">{state.skippedPaths.slice(0,10).map((path:string,index:number)=><li key={`${path}-${index}`} className="break-all">{path}</li>)}</ul></details>}{!state.profile.films.length&&<p className="mt-3 text-xs text-warning-text">At least one film record is required.</p>}</div>}</section>;})}</div><div className="mt-5 flex flex-wrap items-center gap-3"><button onClick={compareImportedProfiles} disabled={!comparisonReady||comparisonBusy.A||comparisonBusy.B} className="rounded-lg bg-button-green px-4 py-2.5 text-sm font-semibold text-background hover:bg-button-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green">Compare profiles</button><button onClick={clearComparison} className="rounded-lg border border-line px-4 py-2.5 text-sm text-primary hover:border-primary-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green">Clear comparison</button><span className="text-xs text-body">Both profiles need at least one film record.</span></div><p role="status" className="sr-only">{comparisonResult&&<>Comparison complete: {comparisonResult.sharedFilms.length} shared films, {comparisonResult.uniqueToA.length} unique to Profile A, {comparisonResult.uniqueToB.length} unique to Profile B.</>}</p>{comparisonResult&&<div className="mt-6 space-y-5"><div className="grid gap-4 md:grid-cols-3"><div className="panel p-4"><div className="text-sm text-body">Shared films</div><div className="mt-2 text-2xl font-semibold">{comparisonResult.sharedFilms.length}</div></div><div className="panel p-4"><div className="text-sm text-body">Unique to Profile A</div><div className="mt-2 text-2xl font-semibold">{comparisonResult.uniqueToA.length}</div></div><div className="panel p-4"><div className="text-sm text-body">Unique to Profile B</div><div className="mt-2 text-2xl font-semibold">{comparisonResult.uniqueToB.length}</div></div></div><section className="panel p-5"><h2 className="font-semibold">Rating correlation</h2>{comparisonResult.sharedRatedFilms<3?<p className="mt-2 text-sm leading-6 text-body">At least three shared films rated by both profiles are needed to calculate a correlation. {comparisonResult.sharedRatedFilms} shared film{comparisonResult.sharedRatedFilms===1?'':'s'} currently have ratings from both.</p>:comparisonResult.ratingCorrelation===null?<p className="mt-2 text-sm leading-6 text-body">Rating correlation is unavailable because the shared-film ratings do not vary in one or both profiles.</p>:<p className="mt-2 text-sm leading-6 text-body">Pearson correlation: <strong className="text-primary">{comparisonResult.ratingCorrelation.toFixed(2)}</strong> across {comparisonResult.sharedRatedFilms} shared rated films.</p>}</section><section className="panel p-5"><h2 className="font-semibold">Shared films</h2>{comparisonResult.sharedFilms.length?<div className="mt-3 divide-y divide-line">{comparisonResult.sharedFilms.map((film:any,index:number)=><article key={`${film.title}-${film.year}-${index}`} className="py-4 first:pt-0 last:pb-0"><h3 className="font-medium">{film.title} <span className="text-sm text-body">({film.year??'Year unknown'})</span></h3><div className="mt-2 grid gap-2 text-sm text-body sm:grid-cols-2"><div>Profile A · Rating: {film.a.rating??'—'}{film.a.diaryDates.length>0&&<p className="mt-1 text-xs">Diary dates: {film.a.diaryDates.join(', ')}</p>}</div><div>Profile B · Rating: {film.b.rating??'—'}{film.b.diaryDates.length>0&&<p className="mt-1 text-xs">Diary dates: {film.b.diaryDates.join(', ')}</p>}</div></div>{film.ratingDifference!==null&&<p className="mt-2 text-xs text-body">Rating difference (Profile A − Profile B): {film.ratingDifference.toFixed(2)}</p>}</article>)}</div>:<p className="mt-2 text-sm text-body">No shared films matched by normalized title and year.</p>}</section><div className="grid gap-5 lg:grid-cols-2"><section className="panel p-5"><h2 className="font-semibold">Unique to Profile A</h2>{comparisonResult.uniqueToA.length?<ul className="mt-3 divide-y divide-line">{comparisonResult.uniqueToA.map((film:any,index:number)=><li key={`${film.title}-${film.year}-${index}`} className="py-3 first:pt-0 last:pb-0"><div className="font-medium">{film.title} <span className="text-sm text-body">({film.year??'Year unknown'})</span></div><p className="mt-1 text-xs text-body">Rating: {film.rating??'—'}</p>{film.diaryDates.length>0&&<p className="mt-1 text-xs text-body">Diary dates: {film.diaryDates.join(', ')}</p>}</li>)}</ul>:<p className="mt-2 text-sm text-body">No unique films.</p>}</section><section className="panel p-5"><h2 className="font-semibold">Unique to Profile B</h2>{comparisonResult.uniqueToB.length?<ul className="mt-3 divide-y divide-line">{comparisonResult.uniqueToB.map((film:any,index:number)=><li key={`${film.title}-${film.year}-${index}`} className="py-3 first:pt-0 last:pb-0"><div className="font-medium">{film.title} <span className="text-sm text-body">({film.year??'Year unknown'})</span></div><p className="mt-1 text-xs text-body">Rating: {film.rating??'—'}</p>{film.diaryDates.length>0&&<p className="mt-1 text-xs text-body">Diary dates: {film.diaryDates.join(', ')}</p>}</li>)}</ul>:<p className="mt-2 text-sm text-body">No unique films.</p>}</section></div></div>}</>}
-{data&&active==='Settings & privacy'&&<><PageTitle kicker="YOUR DATA, YOUR CALL" title="Privacy is a feature." sub="The current MVP processes files in your browser and does not retain them on a server."/><div className="grid gap-4 md:grid-cols-2"><div className="panel p-5"><ShieldCheck size={21} className="text-primary-green"/><h2 className="mt-3 font-semibold">Local processing</h2><p className="mt-2 text-sm leading-6 text-body">CSV parsing, ZIP extraction, and analytics run client-side. There is no account, database, or upload API in this MVP.</p></div><div className="panel p-5"><Database size={21} className="text-primary-green"/><h2 className="mt-3 font-semibold">Clear current session</h2><p className="mt-2 text-sm leading-6 text-body">Clear the imported data from app state. Reloading the page also resets the session.</p><button onClick={clearSession} className="mt-4 rounded-lg border border-line px-3 py-2 text-sm hover:border-primary-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green">Clear imported data</button></div><div className="panel p-5 md:col-span-2"><h2 className="font-semibold">External services</h2><p className="mt-2 text-sm leading-6 text-body">Optional metadata integrations are disabled unless configured. No user passwords, Letterboxd session cookies, or private endpoints are used. Public-profile ingestion is not active in this MVP.</p><div className="mt-3 text-xs text-body">For GitHub Pages, enter a personal TMDB v3 API key in the import dialog. It is used directly from the browser and is not a server-side secret. Do not reuse a key you need to keep confidential. TMDB attribution and current usage/licensing terms apply.</div></div></div></>}
-{!data&&active!=='Overview'&&active!=='Compare profiles'&&<div className="panel p-8"><div className="mx-auto flex max-w-md flex-col items-center text-center"><div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-raised text-primary-green"><FolderOpen size={26}/></div><h2 className="text-xl font-semibold">Your dataset comes first.</h2><p className="mt-2 text-sm leading-6 text-body">Import your Letterboxd export to explore this section.</p><div className="mt-5 flex gap-3"><button onClick={e=>openImport(e.currentTarget)} className="rounded-lg bg-button-green px-4 py-2.5 text-sm font-bold text-background transition-colors hover:bg-button-hover active:bg-button-active">Import data</button></div></div></div>}
-<footer className="mt-9 border-t border-line pt-5 text-xs leading-5 text-secondary"><div className="flex flex-col justify-between gap-2 sm:flex-row"><span>FRAME BY FRAME · Created and maintained by Melvin Varghese</span><span>Not affiliated with Letterboxd. No official Letterboxd API used.</span>{data?.films?.some((f:any)=>f.tmdbId)&&<span className="mt-2 block">This product uses the TMDB API but is not endorsed or certified by TMDB. <a className="text-link underline underline-offset-2 hover:text-link-hover" href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a></span>}</div></footer></div></div>
-{showImport&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={closeImport}><div ref={importDialogRef} role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" tabIndex={-1} className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line bg-raised p-5 md:p-7" onClick={e=>e.stopPropagation()}><div className="flex items-start justify-between"><div><div className="text-xs font-bold uppercase tracking-[.2em] text-primary-green">DATA IMPORT</div><h2 id="import-dialog-title" className="mt-2 text-2xl font-semibold">Bring your film journal in.</h2><p className="mt-2 text-sm leading-6 text-body">Choose a Letterboxd export ZIP or one or more CSV files. Files stay in this browser.</p></div><button aria-label="Close import dialog" onClick={closeImport} className="rounded-lg p-2 hover:bg-raised"><X size={18}/></button></div>{messageError&&message&&<div role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-error-border bg-error-surface px-4 py-3 text-sm text-error-text"><Info size={17} className="mt-0.5 shrink-0 text-error-icon"/><span>{message}</span></div>}<div className="mt-5 rounded-xl border border-dashed border-line bg-surface p-6 text-center"><input ref={fileRef} type="file" accept=".zip,.csv,application/zip,text/csv" multiple className="hidden" onChange={e=>readFiles(e.target.files)}/><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-raised text-primary-green"><Upload size={23}/></div><div className="mt-3 font-medium">Select export files</div><p className="mt-1 text-xs text-body">ZIP or CSV · up to 40 MB per selected file</p><button onClick={()=>{if(!busy)fileRef.current?.click();}} aria-disabled={busy} className={`mt-4 rounded-lg bg-button-green px-4 py-2.5 text-sm font-bold text-background transition-colors hover:bg-button-hover active:bg-button-active ${busy?'cursor-not-allowed opacity-60':''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green`}>{busy?'Reading files…':'Browse files'}</button></div>{(preview.length>0||skippedPaths.length>0||message.startsWith('No supported CSV files were recognized.'))&&<div className="mt-5"><h3 className="text-sm font-semibold">Import preview</h3><p className="mt-1 text-xs text-body">Detected CSVs and rows before normalization. Review these before importing.</p><div className="mt-3 space-y-2">{preview.map((f,i)=><div key={i} className="flex items-center gap-3 rounded-lg border border-line p-3"><FileArchive size={17} className="text-primary-green"/><div className="min-w-0 flex-1"><div className="truncate text-sm">{f.name}</div><div className="mt-1 text-xs text-body">{f.type} · {f.rows.length} rows</div></div><CheckCircle2 size={16} className="text-primary-green"/></div>)}</div>{preview.length===0&&<p className="mt-3 rounded-lg border border-error-border bg-error-surface p-3 text-xs leading-5 text-error-text">No supported CSV files were recognized. Choose supported individual CSVs or a Letterboxd ZIP containing canonical root CSVs. Ignored paths are shown in the preview.</p>}{skippedPaths.length>0&&<div className="mt-4 rounded-lg border border-warning-border bg-warning-surface p-3 text-xs text-warning-text"><div className="font-semibold">Ignored CSV paths ({skippedPaths.length})</div><ul className="mt-2 space-y-1">{skippedPaths.slice(0,10).map((path,i)=><li key={`${path}-${i}`} className="break-all">{path}</li>)}</ul>{skippedPaths.length>10&&<p className="mt-2">And {skippedPaths.length-10} more CSV path{skippedPaths.length-10===1?'':'s'}.</p>}</div>}{preview.length>0&&<div className="mt-4 rounded-lg bg-raised p-3 text-xs leading-5 text-body">Diary files enable viewing timelines; ratings enable rating analysis; watched files add films without assuming a diary date; watchlist files remain separate from watched films. Reviews can attach text but do not imply a rating.</div>}{preview.length>0&&<div className="mt-4 rounded-xl border border-line bg-surface p-4 text-left"><label htmlFor="tmdb-api-key" className="text-sm font-semibold">TMDB API key <span className="font-normal text-body">(optional)</span></label><p className="mt-1 text-xs leading-5 text-body">Enter your own TMDB API key to look up posters, genres, release dates, popularity, and external ratings for up to 100 films during this import. The key stays in this browser session and is sent directly to TMDB; it is not saved to our server or local storage.</p><input id="tmdb-api-key" type="password" autoComplete="off" spellCheck={false} value={tmdbApiKey} onChange={e=>setTmdbApiKey(e.target.value)} placeholder="Paste TMDB API Key (v3 auth)" className="mt-3 w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary-green focus-visible:ring-2 focus-visible:ring-primary-green"/><div className="mt-2 flex flex-wrap items-center justify-between gap-2"><a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer" className="text-xs text-link underline underline-offset-2 hover:text-link-hover">Get a TMDB API key ↗</a><span className="text-[11px] text-body">Leave blank for local-only analysis</span></div></div>}{preview.length>0&&<button onClick={importData} disabled={enriching||!preview.length} className="mt-4 w-full rounded-lg bg-button-green px-4 py-3 text-sm font-bold text-background transition-colors hover:bg-button-hover active:bg-button-active disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-green">{enriching?'Enriching film metadata…':`Analyze ${preview.length} file${preview.length===1?'':'s'}${tmdbApiKey.trim()?' + TMDB metadata':''}`}</button>}</div>}</div></div>}
-</main>}
-function Empty({text}:{text:string}){return <div className="flex min-h-[130px] items-center justify-center px-4 py-8 text-center text-sm leading-6 text-body">{text}</div>}
-function Metric({label,value}:{label:string,value:any}){return <div className="panel p-4"><div className="text-xs text-body">{label}</div><div className="mt-3 break-words text-xl font-semibold">{value}</div></div>}
-function PageTitle({kicker,title,sub}:{kicker:string,title:string,sub:string}){return <div className="mb-7"><div className="mb-2 text-xs uppercase tracking-[.18em] text-primary-green">{kicker}</div><h1 className="text-2xl font-semibold md:text-3xl">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-body">{sub}</p></div>}
