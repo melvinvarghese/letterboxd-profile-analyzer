@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "test": "node --test tests/analytics.test.mjs tests/import.test.mjs tests/integrity.test.mjs tests/tmdb.test.mjs",
+    "test": "node --test tests/analytics.test.mjs tests/import.test.mjs tests/integrity.test.mjs tests/tmdb.test.mjs tests/theme-palette.test.mjs",
     "lint": "tsc --noEmit",
     "build:pages": "node scripts/build-pages.mjs",
     "test:e2e": "playwright test",

@@ -3,18 +3,25 @@
 @tailwind utilities;
 :root {
   color-scheme: dark;
-  --bg: #101814;
-  --surface: #17211b;
-  --raised: #1e2a22;
-  --line: #344438;
-  --ink: #f1f0e6;
-  --body: #b4c0b5;
-  --muted: #9ead9f;
-  --green: #b2d6a4;
-  --accent: #83b68b;
-  --button: #b8dba9;
-  --button-text: #182a1c;
-  --gold: #dab878;
+  --bg: #111923;
+  --surface: #1B2732;
+  --raised: #24333F;
+  --line: #40515C;
+  --ink: #F1EFE8;
+  --body: #A8B4BA;
+  --muted: #8E9CA4;
+  --amber: #E7AD45;
+  --cyan: #69BDC7;
+  --link: var(--cyan);
+  --button: var(--amber);
+  --button-text: #111923;
+  --focus: var(--amber);
+  --chart-primary: var(--amber);
+  --chart-secondary: var(--cyan);
+  --activity-1: #B07725;
+  --activity-2: #C07E29;
+  --activity-3: #D39232;
+  --activity-4: #E7AD45;
   --error: #ffc0b6;
   --error-bg: #38241f;
   --shadow: 0 24px 80px #0005;
@@ -23,25 +30,32 @@
   --color-text-primary: var(--ink);
   --color-text-body: var(--body);
   --color-border: var(--line);
-  --color-focus: var(--green);
+  --color-focus: var(--focus);
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f5f2e9;
-  --surface: #fffcf4;
-  --raised: #e9ede1;
-  --line: #ccd3c4;
-  --ink: #1c3023;
-  --body: #53624f;
-  --muted: #586c55;
-  --green: #315d38;
-  --accent: #4b8055;
-  --button: #315c38;
-  --button-text: #fffdf4;
-  --gold: #80602b;
+  --bg: #F4F1E8;
+  --surface: #FFFCF5;
+  --raised: #E9E5DA;
+  --line: #C8C3B7;
+  --ink: #24313B;
+  --body: #45545C;
+  --muted: #52616A;
+  --amber: #785000;
+  --cyan: #126B75;
+  --link: var(--cyan);
+  --button: var(--amber);
+  --button-text: #F4F1E8;
+  --focus: var(--amber);
+  --chart-primary: var(--amber);
+  --chart-secondary: var(--cyan);
+  --activity-1: #785000;
+  --activity-2: #876015;
+  --activity-3: #966F2B;
+  --activity-4: #A47C3B;
   --error: #8e2f20;
   --error-bg: #ffebe5;
-  --shadow: 0 24px 80px #27351b26;
+  --shadow: 0 24px 80px #24313b26;
 }
 * {
   box-sizing: border-box;
@@ -79,7 +93,7 @@ button:disabled {
   cursor: default;
 }
 a {
-  color: var(--green);
+  color: var(--link);
   text-decoration: none;
 }
 a:hover {
@@ -119,7 +133,7 @@ input::placeholder {
   color: var(--muted);
 }
 input[type="checkbox"] {
-  accent-color: var(--green);
+  accent-color: var(--amber);
   width: 17px;
   height: 17px;
   min-height: 17px;
@@ -137,10 +151,10 @@ label {
 }
 input:focus,
 select:focus {
-  border-color: var(--green);
+  border-color: var(--focus);
 }
 :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--focus);
   outline-offset: 4px;
 }
 main:focus {
@@ -226,7 +240,7 @@ main:focus {
   align-items: center;
   justify-content: flex-start;
   gap: 5px;
-  color: var(--green);
+  color: var(--cyan);
   background: none;
   border: 0;
   padding: 7px 0;
@@ -268,7 +282,7 @@ main:focus {
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 1.8px;
-  color: var(--green);
+  color: var(--cyan);
   text-transform: uppercase;
 }
 .error-text {
@@ -300,12 +314,12 @@ main:focus {
   text-decoration: none;
 }
 .brand-mark {
-  border: 1px solid var(--green);
+  border: 1px solid var(--cyan);
   width: 36px;
   height: 39px;
   display: grid;
   place-items: center;
-  color: var(--green);
+  color: var(--cyan);
   border-radius: 4px;
 }
 .brand strong {
@@ -350,7 +364,7 @@ main:focus {
 }
 .sidebar nav button[aria-current="page"] {
   background: var(--raised);
-  color: var(--green);
+  color: var(--amber);
 }
 .sidebar nav button small {
   margin-left: auto;
@@ -365,7 +379,7 @@ main:focus {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--green);
+  color: var(--cyan);
 }
 .sidebar-bottom > small {
   color: var(--muted);
@@ -436,7 +450,7 @@ main:focus {
 .local-badge i {
   width: 5px;
   height: 5px;
-  background: var(--green);
+  background: var(--cyan);
   border-radius: 100%;
 }
 .mobile-menu {
@@ -466,7 +480,7 @@ main:focus {
 }
 .notice > svg {
   margin-top: 3px;
-  color: var(--green);
+  color: var(--cyan);
 }
 .notice .icon-btn {
   margin: -6px -7px -6px auto;
@@ -637,15 +651,15 @@ main:focus {
 }
 .column-track > span {
   width: 100%;
-  background: var(--accent);
+  background: var(--chart-primary);
   border-radius: 3px 3px 0 0;
   min-height: 1px;
 }
-.gold .column-track > span {
-  background: var(--gold);
+.columns.cyan .column-track > span {
+  background: var(--chart-secondary);
 }
 .column:hover:not(:disabled) .column-track > span {
-  background: var(--green);
+  filter: brightness(1.08);
 }
 .column:focus-visible {
   outline-offset: -2px;
@@ -706,10 +720,10 @@ main:focus {
 .bar-track > span {
   height: 4px;
   display: block;
-  background: var(--accent);
+  background: var(--chart-primary);
 }
 .bar-number {
-  color: var(--green);
+  color: var(--amber);
   font-size: 14px;
   line-height: 1.5;
   text-align: right;
@@ -781,7 +795,7 @@ main:focus {
   margin-top: 5px;
 }
 .film-tile b {
-  color: var(--green);
+  color: var(--amber);
   font-weight: 500;
 }
 .poster {
@@ -835,7 +849,7 @@ main:focus {
   object-fit: cover;
 }
 .film-tile:hover .poster {
-  border-color: var(--green);
+  border-color: var(--cyan);
 }
 .film-list > button {
   display: flex;
@@ -872,7 +886,7 @@ main:focus {
 }
 .film-list b {
   font-size: 12px;
-  color: var(--green);
+  color: var(--amber);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -890,7 +904,7 @@ main:focus {
   padding-bottom: 0;
 }
 .insights svg {
-  color: var(--green);
+  color: var(--cyan);
   margin-top: 3px;
 }
 .insights h3 {
@@ -914,7 +928,7 @@ main:focus {
   font-family: Georgia, serif;
   font-size: 58px;
   line-height: 1.3;
-  color: var(--green);
+  color: var(--amber);
 }
 .time-number small {
   font-family: ui-sans-serif, system-ui, sans-serif;
@@ -1079,7 +1093,7 @@ th:last-child {
   text-decoration: underline;
 }
 .rating {
-  color: var(--green);
+  color: var(--amber);
   white-space: nowrap;
 }
 .pager {
@@ -1149,7 +1163,7 @@ th:last-child {
 }
 .segmented button[aria-pressed="true"] {
   background: var(--raised);
-  color: var(--green);
+  color: var(--amber);
 }
 .calendar-scroll {
   overflow-x: auto;
@@ -1175,7 +1189,7 @@ th:last-child {
   padding: 0;
 }
 .calendar > button:hover {
-  outline: 1px solid var(--green);
+  outline: 1px solid var(--cyan);
   outline-offset: 1px;
 }
 .calendar-months {
@@ -1209,16 +1223,16 @@ th:last-child {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 [data-level="1"] {
-  background: #355d40;
+  background: var(--activity-1);
 }
 [data-level="2"] {
-  background: #548259;
+  background: var(--activity-2);
 }
 [data-level="3"] {
-  background: #7ba275;
+  background: var(--activity-3);
 }
 [data-level="4"] {
-  background: #b8dba9;
+  background: var(--activity-4);
 }
 .checkbox-label {
   display: flex;
@@ -1272,7 +1286,7 @@ th:last-child {
   padding: 4px 7px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  color: var(--green);
+  color: var(--cyan);
   font-size: 9px;
 }
 .metadata-layout {
@@ -1350,7 +1364,7 @@ th:last-child {
   margin: 23px 0;
 }
 .welcome h1 em {
-  color: var(--green);
+  color: var(--cyan);
   font-weight: 400;
 }
 .welcome-copy > p {
@@ -1396,14 +1410,14 @@ th:last-child {
 .film-frame {
   width: 45%;
   aspect-ratio: 2/3;
-  border: 1px solid #74886b;
+  border: 1px solid var(--line);
   position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 12px 17px 0 #09170b35;
-  background: #435440;
-  color: #e0e6cd;
+  box-shadow: 12px 17px 0 #00000035;
+  background: var(--surface);
+  color: var(--ink);
 }
 .film-frame span {
   position: absolute;
@@ -1428,10 +1442,10 @@ th:last-child {
 .frame-two {
   left: 44%;
   top: 20%;
-  background: #b2ad8c;
-  color: #343b2c;
+  background: var(--amber);
+  color: var(--button-text);
   transform: rotate(10deg);
-  border-color: #b8bd9f;
+  border-color: var(--amber);
 }
 .frame-two svg {
   stroke-width: 0.7;
@@ -1463,7 +1477,7 @@ th:last-child {
   gap: 9px;
 }
 .welcome-strip svg {
-  color: var(--green);
+  color: var(--cyan);
 }
 .steps {
   display: grid;
@@ -1473,7 +1487,7 @@ th:last-child {
 }
 .steps article > span {
   font-size: 10px;
-  color: var(--green);
+  color: var(--cyan);
   letter-spacing: 1px;
   display: block;
   margin-bottom: 17px;
@@ -1515,7 +1529,7 @@ th:last-child {
   max-width: min(94vw, 800px);
 }
 .modal::backdrop {
-  background: #050b08d6;
+  background: rgb(0 0 0 / 84%);
   backdrop-filter: blur(4px);
 }
 .modal-header {
@@ -1554,11 +1568,11 @@ th:last-child {
   background: var(--bg);
 }
 .dropzone.dragging {
-  border-color: var(--green);
+  border-color: var(--cyan);
   background: var(--raised);
 }
 .dropzone > svg {
-  color: var(--green);
+  color: var(--cyan);
   margin-bottom: 16px;
 }
 .dropzone h3 {
@@ -1581,12 +1595,12 @@ th:last-child {
   border-top: 1px solid var(--line);
 }
 .privacy-line svg {
-  color: var(--green);
+  color: var(--cyan);
 }
 progress {
   width: 100%;
   height: 5px;
-  accent-color: var(--green);
+  accent-color: var(--cyan);
 }
 .import-progress {
   display: flex;
@@ -1606,7 +1620,7 @@ progress {
   margin: 20px 0;
 }
 .preview-heading svg {
-  color: var(--green);
+  color: var(--cyan);
   margin-top: 3px;
 }
 .preview-heading h3 {
@@ -1633,7 +1647,7 @@ progress {
   color: var(--body);
 }
 .warnings > summary {
-  color: var(--green);
+  color: var(--cyan);
   cursor: pointer;
   min-height: 30px;
   line-height: 1.9;
@@ -1653,7 +1667,7 @@ progress {
   text-align: center;
 }
 .compare-upload > svg {
-  color: var(--green);
+  color: var(--cyan);
   margin: auto auto 15px;
 }
 .compare-upload h3 {
@@ -1704,7 +1718,7 @@ progress {
   display: flex;
   gap: 24px;
   margin: 17px 0;
-  color: var(--green);
+  color: var(--cyan);
   font-size: 23px;
   flex-wrap: wrap;
 }
@@ -1858,7 +1872,7 @@ progress {
     display: block;
     position: fixed;
     inset: 0;
-    background: #0008;
+    background: rgb(0 0 0 / 53%);
     border: 0;
     z-index: 29;
   }
@@ -2415,7 +2429,7 @@ td,
   border-color: var(--button);
 }
 .heat-cell:hover:not(:disabled) {
-  outline: 1px solid var(--green);
+  outline: 1px solid var(--cyan);
 }
 .heat-cell small {
   margin: 0;

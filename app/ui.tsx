@@ -143,7 +143,7 @@ export function Columns({
   value = "count",
   label = "name",
   suffix = "",
-  color = "green",
+  color = "amber",
 }: any) {
   const max = Math.max(1, ...data.map((d: any) => d[value] || 0));
   return data.length ? (

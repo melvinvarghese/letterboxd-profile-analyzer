@@ -114,7 +114,7 @@ export function Overview({
               name: String(d.rating),
             }))}
             onSelect={(d: any) => onRating(d.rating)}
-            color="gold"
+            color="amber"
           />
           <p className="footnote">
             Half-star steps on a 5-star scale. {s.uniqueFilms - s.ratedFilms}{" "}
@@ -653,7 +653,7 @@ export function Ratings({ result, onFilm, onRating, onDrill, scope }: any) {
               name: `${d.rating}★`,
             }))}
             onSelect={(d: any) => onRating(d.rating)}
-            color="gold"
+            color="amber"
           />
         </Section>
         <Section
@@ -1202,6 +1202,7 @@ export function YearCompare({ data, onFilm }: any) {
                     ...m,
                     name: months[j],
                   }))}
+                  color={i === 0 ? "amber" : "cyan"}
                 />
                 <p className="footnote">
                   Current film mean: {fmt(r.average)} / 5 across {r.ratedFilms}{" "}
@@ -1212,7 +1213,7 @@ export function YearCompare({ data, onFilm }: any) {
                     ...d,
                     name: `${d.rating}★`,
                   }))}
-                  color="gold"
+                  color={i === 0 ? "amber" : "cyan"}
                 />
               </Section>
             ))}
