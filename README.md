@@ -6,6 +6,12 @@ Analyze a Letterboxd export in your browser. Explore viewing history, ratings, r
 
 Created and maintained by [Melvin Varghese](https://melvinvarghese.in). This is an independent project and is not affiliated with or endorsed by Letterboxd. It does not use Letterboxd's API or ask for your password or session cookie.
 
+## Website visits
+
+![Total website visits](https://melvinvarghese.goatcounter.com/counter/TOTAL.svg)
+
+The counter above shows the total page views recorded by GoatCounter across the website. Visit [the GoatCounter dashboard](https://melvinvarghese.goatcounter.com/) for daily traffic, referrers, and other statistics. Tracking starts after the updated site is deployed; earlier visits are not included.
+
 ## Import your data
 
 1. Request and download your account export from [Letterboxd](https://letterboxd.com/user/exportdata).
