@@ -1,4 +1,6 @@
 import "./globals.css";
+import Script from "next/script";
+
 export const metadata = {
   title: "Frame by Frame · Letterboxd Profile Analyzer",
   description:
@@ -17,7 +19,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Script
+          data-goatcounter="https://melvinvarghese.goatcounter.com/count"
+          src="https://gc.zgo.at/count.js"
+          strategy="afterInteractive"
+        />
+      </body>
     </html>
   );
 }
