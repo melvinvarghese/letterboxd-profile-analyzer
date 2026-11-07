@@ -61,5 +61,3 @@ Third-party acknowledgements and asset notices are listed in [THIRD_PARTY_NOTICE
 ## Website visits
 
 ![Total website visits](https://melvinvarghese.goatcounter.com/counter/TOTAL.svg)
-
-The counter above shows the total page views recorded by GoatCounter across the website. Visit [the GoatCounter dashboard](https://melvinvarghese.goatcounter.com/) for daily traffic, referrers, and other statistics. Tracking starts after the updated site is deployed; earlier visits are not included.
