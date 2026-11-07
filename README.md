@@ -73,4 +73,4 @@ This is an independent project by [Melvin Varghese](https://melvinvarghese.in), 
 
 ## Website visits
 
-![Total website visits](https://melvinvarghese.goatcounter.com/counter/TOTAL.svg)
+![Total website visits](https://melvinvarghese.goatcounter.com/counter/TOTAL.svg?v=20261107)
