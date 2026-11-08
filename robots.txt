@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://melvinvarghese.github.io/letterboxd-profile-analyzer/sitemap.xml
